@@ -18,6 +18,18 @@ if [ -z "${SCANNER_TOKEN:-}" ]; then
   exit 1
 fi
 
+if ! command -v docker >/dev/null 2>&1; then
+  echo "Docker is not installed. Install it with:" >&2
+  echo "  brew install --cask docker" >&2
+  echo "or download it from https://www.docker.com/products/docker-desktop/" >&2
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker engine is not running. Start Docker Desktop (or the docker daemon) and try again." >&2
+  exit 1
+fi
+
 IMAGE="cc-agent"
 SCANNER_IP="${SCANNER_IP:-100.123.181.11}"
 
