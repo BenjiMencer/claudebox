@@ -1,0 +1,13 @@
+# Keep secrets out of the Docker build context.
+# The .env is read directly by the shell alias (sourcing reads from disk and
+# does NOT involve build context), so it never needs to be sent to the daemon.
+.env
+*.env
+.env.*
+
+# Not needed in the image.
+README.md
+run.sh
+add_to_zhrc.txt
+.git
+.gitignore

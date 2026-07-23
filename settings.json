@@ -1,0 +1,19 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "http://100.123.181.11:8080",
+    "ANTHROPIC_API_KEY": "dummy",
+    "CLAUDE_CODE_MAX_CONTEXT_TOKENS": "131072",
+    "CLAUDE_CODE_MAX_OUTPUT_TOKENS": "8192",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "115000",
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "92",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION": "llm-local",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "Local Compute Node",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Pass-through pipeline to active workstation weights",
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES": "adaptive_thinking"
+  },
+  "model": "llm-local",
+  "skipWorkflowUsageWarning": true,
+  "permissions": {
+    "deny": ["WebSearch", "WebFetch"]
+  }
+}
