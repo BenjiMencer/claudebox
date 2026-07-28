@@ -37,7 +37,7 @@ Pass extra arguments straight through to the `claude` CLI, e.g.:
 
 ## Recommended: a shell function for daily use
 
-`add_to_zhrc.txt` has a `claude-local` zsh function you can paste into
+`add_to_zshrc.txt` has a `claude-local` zsh function you can paste into
 `~/.zshrc`. Note it also includes a few unrelated shell niceties (`$EDITOR`,
 `AUTO_CD`, history settings) at the top — trim those if you already set your
 own, and only take the `claude-local` function itself. It does everything
@@ -51,11 +51,11 @@ own, and only take the `claude-local` function itself. It does everything
 - works from *any* directory — it always mounts your current working
   directory, not this repo.
 
-Setup — append `add_to_zhrc.txt`'s contents to `~/.zshrc` (or paste the
+Setup — append `add_to_zshrc.txt`'s contents to `~/.zshrc` (or paste the
 `claude-local` function in manually), then create a `.env` next to this repo:
 
 ```bash
-cat add_to_zhrc.txt >> ~/.zshrc
+cat add_to_zshrc.txt >> ~/.zshrc
 echo 'SCANNER_TOKEN=<your token>' > ~/claude-docker/.env
 source ~/.zshrc
 ```
@@ -70,16 +70,34 @@ claude-local
 
 ## Verify it yourself (do this — don't trust it blind)
 
-With the container running:
+The container is named `cc-agent-<directory>` (one per project directory, so
+you can run several at once without name collisions — see "Running multiple
+containers" below). Find the exact name with `docker ps`, then:
 
 ```bash
+NAME=cc-agent-yourdir   # from `docker ps`
 # internet should be blocked:
-docker exec -it cc-agent curl -s --max-time 5 http://1.1.1.1; echo "exit=$?"
+docker exec -it "$NAME" curl -s --max-time 5 http://1.1.1.1; echo "exit=$?"
 # scanner should work:
-docker exec -it cc-agent curl -s --max-time 5 http://100.123.181.11:8099/health; echo
+docker exec -it "$NAME" curl -s --max-time 5 http://100.123.181.11:8099/health; echo
 # agent user should NOT be able to flush the rules:
-docker exec -it -u ccagent cc-agent sudo iptables -F 2>&1 || echo "denied — good"
+docker exec -it -u ccagent "$NAME" sudo iptables -F 2>&1 || echo "denied — good"
 ```
+
+## Running multiple containers
+
+Both `run.sh` and `claude-local` name the container after the current
+directory's basename (e.g. `cc-agent-myproject`), so running the agent from
+several project directories at once just works — each gets its own
+container. Running it twice from the *same* directory still refuses to start
+a second instance (see below), since two agents editing the same mounted
+files at once isn't safe.
+
+If a container with that name already exists — usually a stale one left
+behind by a crashed terminal, a sleeping Mac, or a Docker Desktop restart
+(since `--rm` only cleans up on a normal exit) — the script reclaims it
+automatically if it's stopped, or tells you how to attach to or remove it if
+it's still running.
 
 ## Files
 
@@ -90,7 +108,7 @@ docker exec -it -u ccagent cc-agent sudo iptables -F 2>&1 || echo "denied — go
 - `selftest.sh` — fail-closed check that the internet is blocked and the
   scanner is reachable, before the agent is ever allowed to start.
 - `run.sh` — build + run with the right flags, mounting the current directory.
-- `add_to_zhrc.txt` — optional `claude-local` shell function for day-to-day use
+- `add_to_zshrc.txt` — optional `claude-local` shell function for day-to-day use
   from any project directory.
 - `CLAUDE.md` — project instructions telling the agent to use only the scanner
   for web access and to treat scanned page content as untrusted data.

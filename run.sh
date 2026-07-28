@@ -31,6 +31,12 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 IMAGE="cc-agent"
+# One container per project directory, so running this from several projects
+# at once gives each its own container instead of colliding on the name.
+# Re-running from the SAME directory still hits the stale/running check
+# below, since two agents editing the same mounted files at once is unsafe.
+DIR_SLUG="$(basename "$PWD" | sed 's/[^a-zA-Z0-9_.-]/_/g')"
+CONTAINER_NAME="cc-agent-${DIR_SLUG}"
 SCANNER_IP="${SCANNER_IP:-100.123.181.11}"
 
 # The API base URL is on the mesh in your config; keep it consistent here.
@@ -38,8 +44,25 @@ ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://${SCANNER_IP}:8080}"
 
 docker build -t "$IMAGE" .
 
+# --rm only cleans up cc-agent on a normal exit. A crashed terminal, sleeping
+# Mac, or Docker Desktop restart can leave a stale container with this name
+# behind, which makes the `docker run --name` below fail with "already in
+# use". Reclaim a stale (stopped) one automatically; leave a genuinely
+# running one alone and tell the user how to deal with it, since killing it
+# could interrupt a session in another terminal.
+existing_running="$(docker inspect -f '{{.State.Running}}' "$CONTAINER_NAME" 2>/dev/null || true)"
+if [ "$existing_running" = "true" ]; then
+  echo "A '${CONTAINER_NAME}' container is already running." >&2
+  echo "Attach to it with:  docker attach ${CONTAINER_NAME}" >&2
+  echo "Or stop it first:   docker rm -f ${CONTAINER_NAME}" >&2
+  exit 1
+elif [ -n "$existing_running" ]; then
+  echo "Removing stale '${CONTAINER_NAME}' container from a previous run..."
+  docker rm "$CONTAINER_NAME" >/dev/null
+fi
+
 exec docker run -it --rm \
-  --name cc-agent \
+  --name "$CONTAINER_NAME" \
   --cap-drop=ALL \
   --cap-add=NET_ADMIN \
   --cap-add=SETUID \
