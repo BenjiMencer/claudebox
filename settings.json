@@ -9,7 +9,8 @@
     "ANTHROPIC_CUSTOM_MODEL_OPTION": "llm-local",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_NAME": "Local Compute Node",
     "ANTHROPIC_CUSTOM_MODEL_OPTION_DESCRIPTION": "Pass-through pipeline to active workstation weights",
-    "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES": "adaptive_thinking"
+    "ANTHROPIC_CUSTOM_MODEL_OPTION_SUPPORTED_CAPABILITIES": "adaptive_thinking",
+    "CLAUDE_CODE_SUBAGENT_MODEL": "llm-local"
   },
   "model": "llm-local",
   "skipWorkflowUsageWarning": true,
