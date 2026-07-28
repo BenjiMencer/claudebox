@@ -68,6 +68,13 @@ def main() -> None:
     sc = sub.add_parser("scan")
     sc.add_argument("url")
     sc.add_argument("--task", default="summarize the key points")
+    sc.add_argument(
+        "--skip-summarization",
+        action="store_true",
+        help="Return the raw extracted page text instead of an LLM summary. "
+        "Use this when you need exact wording, numbers, or quotes from the "
+        "page rather than a summary.",
+    )
 
     args = p.parse_args()
 
@@ -77,7 +84,14 @@ def main() -> None:
         mr = max(1, min(20, args.max_results))
         out = _post("/search", {"query": args.query, "max_results": mr})
     elif args.cmd == "scan":
-        out = _post("/scan", {"url": args.url, "task": args.task})
+        out = _post(
+            "/scan",
+            {
+                "url": args.url,
+                "task": args.task,
+                "skip_summarization": args.skip_summarization,
+            },
+        )
     else:  # pragma: no cover
         p.error("unknown command")
 
