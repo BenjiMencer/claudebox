@@ -54,17 +54,25 @@ echo 'SCANNER_TOKEN=<your token>' > ~/claude-docker/.env
 source ~/.zshrc
 ```
 
-`add_to_zshrc.txt` is a one-line `source` of `claude-local.zsh` (plus some
-optional shell niceties you can trim). Sourcing matters: a pasted copy of the
-function silently ignores every future `git pull`, so you end up rebuilding the
-image from new code while the launcher wrapping it stays whatever you pasted
-months ago. That failure is quiet and confusing — `claude-local --rebuild`
-appears to work, and the change still doesn't take effect.
+What that appends is a repo path and a `source` of `claude-local.zsh` (plus
+some optional shell niceties you can trim):
 
-The function finds this repo from its own location, so there is nothing to
-hand-edit if you cloned somewhere other than `~/claude-docker` — just point the
-`source` line in `~/.zshrc` at wherever it is. Then, from any project
-directory:
+```zsh
+CLAUDEBOX_REPO="$HOME/claude-docker"
+[ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
+```
+
+If you cloned somewhere else, `CLAUDEBOX_REPO` is the one line to change —
+everything else derives from it. Leave it out entirely and the function falls
+back to its own file location, which is also correct.
+
+Sourcing rather than pasting matters: a pasted copy of the function silently
+ignores every future `git pull`, so you end up rebuilding the image from new
+code while the launcher wrapping it stays whatever you pasted months ago. That
+failure is quiet and confusing — `claude-local --rebuild` appears to work, and
+the change still doesn't take effect.
+
+Then, from any project directory:
 
 ```bash
 claude-local

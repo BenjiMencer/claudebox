@@ -14,20 +14,21 @@ SAVEHIST=10000
 # ---------------------------------------------------------------------------
 # claude-local: contained, dockerized Claude Code
 #
-# This sources the function from the repo rather than defining it here, so a
+# Where you cloned the repo. This is the only path to edit — everything below
+# is derived from it.
+# ---------------------------------------------------------------------------
+CLAUDEBOX_REPO="$HOME/claude-docker"
+
+# Source the function from the repo rather than defining it here, so a
 # `git pull` actually updates it. Don't paste the function body into .zshrc:
 # a pasted copy silently ignores every future pull, and you end up rebuilding
 # the image from new code while the launcher around it stays old.
-#
-# Adjust the path if you cloned somewhere other than ~/claude-docker.
-# ---------------------------------------------------------------------------
-[ -f "$HOME/claude-docker/claude-local.zsh" ] && \
-  source "$HOME/claude-docker/claude-local.zsh"
+[ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
 
 # Directories where the agent may run without permission prompts. Optional -
-# claude-local.zsh defaults to ~/claude-sandbox. Colon-separated for several.
+# defaults to ~/claude-sandbox. Colon-separated for several.
 #
-# Uncomment to override, but keep it narrow, and never list the claudebox repo
+# Uncomment to override, but keep it narrow, and never list $CLAUDEBOX_REPO
 # itself: bypass there would let the agent rewrite its own allowlist.
 #
 # export CLAUDE_SANDBOX_ROOTS="$HOME/claude-sandbox:$HOME/scratch"

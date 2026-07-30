@@ -3,8 +3,8 @@
 # Source this from ~/.zshrc rather than pasting the function in, so that
 # `git pull` actually updates it:
 #
-#     [ -f "$HOME/claude-docker/claude-local.zsh" ] && \
-#       source "$HOME/claude-docker/claude-local.zsh"
+#     CLAUDEBOX_REPO="$HOME/claude-docker"
+#     [ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
 #
 # A pasted copy silently ignores every future pull - the image rebuilds from
 # the repo but the launcher around it stays whatever you pasted months ago.
@@ -16,21 +16,21 @@
 #   - mounts the CURRENT directory only
 #   - skips permission prompts only under a sandbox root (see sandbox-gate.sh)
 
-# Directory this file lives in, resolved when sourced. It has to be captured
-# out here: inside the function, $0 is the function name, not the file.
-CLAUDEBOX_DIR="${${(%):-%x}:A:h}"
+# Honour CLAUDEBOX_REPO when ~/.zshrc set it, so the path is written down once.
+# Otherwise fall back to this file's own location, which means sourcing it by
+# any path still works. Resolved out here on purpose: inside the function, $0
+# is the function name, not the file.
+CLAUDEBOX_REPO="${CLAUDEBOX_REPO:-${${(%):-%x}:A:h}}"
 
-if [ -f "$CLAUDEBOX_DIR/sandbox-gate.sh" ]; then
-  source "$CLAUDEBOX_DIR/sandbox-gate.sh"
+if [ -f "$CLAUDEBOX_REPO/sandbox-gate.sh" ]; then
+  source "$CLAUDEBOX_REPO/sandbox-gate.sh"
 else
-  echo "claude-local: missing $CLAUDEBOX_DIR/sandbox-gate.sh - bypass disabled." >&2
+  echo "claude-local: missing $CLAUDEBOX_REPO/sandbox-gate.sh - bypass disabled." >&2
 fi
 
 claude-local() {
   local image="cc-agent"
-  # Derived from this file's location, so there is nothing to hand-edit if the
-  # repo lives somewhere else.
-  local claude_docker_dir="$CLAUDEBOX_DIR"
+  local claude_docker_dir="$CLAUDEBOX_REPO"
   local scanner_ip="${SCANNER_IP:-100.123.181.11}"
 
   # Load token (and any other vars) straight from .env on disk.
