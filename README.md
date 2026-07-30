@@ -161,23 +161,28 @@ claudebox-install --lenient  # or --strict, to override that policy
 claudebox-install --clean    # discard this project's dependency volumes
 ```
 
-A throwaway container fetches the packages into a Docker named volume, which the
-launchers mount over `node_modules` / `.venv`. It gets no `SCANNER_TOKEN`, no
-API key, and no added capabilities, and exits when the install finishes. The
-agent's network posture is untouched, and because volumes live in Docker
-Desktop's VM, package code never lands on your Mac.
+A throwaway container fetches the packages. It gets no `SCANNER_TOKEN`, no API
+key, and no added capabilities, and exits when the install finishes — the
+agent's own network posture is untouched.
 
 **Policy follows the sandbox gate** — the same signal that decides permission
 prompts:
 
-| | lifecycle scripts | lockfile | project mount |
+| | lifecycle scripts | lockfile | installs into |
 |---|---|---|---|
-| under a sandbox root | run | written if missing | read-write |
-| elsewhere | disabled | required | manifest only, read-only |
+| under a sandbox root | run | written if missing | `./node_modules`, `./.venv` |
+| elsewhere | disabled | required | a Docker named volume |
 
 Leniency lands where the blast radius is already disposable; real projects keep
 the guardrails. Disabling lifecycle scripts is the part that matters — it's what
 stops `postinstall` being arbitrary code execution at install time.
+
+The storage difference matters for timing. A volume keeps package code off your
+Mac entirely, but it's only mounted when the container *starts*, so a strict
+install mid-session needs a restart before the agent can see it. Under a sandbox
+root the agent already has unrestricted write access to that directory, so a
+volume isolates nothing there — installing straight into it costs no safety and
+shows up immediately, which is what makes agent-triggered installs usable.
 
 Three things to know:
 
@@ -186,9 +191,10 @@ Three things to know:
   inside this Linux container but won't load. Compiling them needs the image
   built with `CLAUDEBOX_BUILD_TOOLS=1` (off by default — it roughly doubles the
   image).
-- **Your Mac editor won't see the dependencies**, so no host-side autocomplete
-  into `node_modules`. An empty directory appears as a mount point; `--clean`
-  removes it.
+- **After a strict install your Mac editor won't see the dependencies**, since
+  they're in a volume — no host-side autocomplete into `node_modules`. An empty
+  directory appears as a mount point; `--clean` removes it. Lenient installs are
+  ordinary directories, so this doesn't apply to them.
 - **This isolates install time, not run time.** The dependency code executes
   inside claudebox, which has your project mounted, so a malicious package can
   still reach your source when the agent runs it.

@@ -29,42 +29,48 @@ Routing through the scanner and honoring its flags are a pair. The network wall
 forces traffic through the reader; this guidance is what stops you trusting what
 a malicious page says. Neither half works alone.
 
-## Installing packages — you can't, so hand it over
+## Installing packages — only ever through the sidecar
 
-Egress is default-drop, there's no DNS, and you can't `sudo`. So `npm install`,
-`pip install`, `apt-get`, `cargo`, and `git clone` all fail here. They fail as
-name-resolution errors or hangs, which looks like a broken proxy rather than a
-deliberate wall — don't retry, don't switch registries, don't hunt for a
-workaround. Say what's needed and let the user run it.
+You have no network, no DNS, and no `sudo`. `pip install`, `npm install`,
+`apt-get`, `cargo`, and `git clone` **all fail here**, every time. They fail as
+name-resolution errors or hangs, which reads like a broken proxy rather than a
+deliberate wall — so the tempting next moves are all wrong. Don't retry. Don't
+try another registry, mirror, or index URL. Don't fetch a wheel or tarball by
+hand. Don't reach for `--user`, `--break-system-packages`, or `sudo`. There is
+exactly one route in, described below, and nothing else will work.
 
-**Project dependencies.** Edit the manifest (`package.json`,
-`requirements.txt`, `pyproject.toml`), then get it installed. Packages arrive in
-a volume mounted over `node_modules` / `.venv`, visible here immediately.
+**Prefer a library over a system tool.** A Python or npm package installs in
+seconds through that route. A system binary needs a `Dockerfile` edit and an
+image rebuild — only the user can do it, and it ends your session. So when
+there's a choice, take the library:
 
-If the session started with `watching for install requests`, you can trigger it
-yourself:
+| need | use | not |
+|---|---|---|
+| read a PDF | `pypdf` | `pdftotext`, `poppler-utils` |
+| read a .docx | `python-docx` | `libreoffice`, `pandoc` |
+| images | `pillow` | `imagemagick` |
+| archives | `zipfile` / `tarfile` (stdlib) | `unzip`, `7z` |
+
+If you genuinely need a system binary, say so and stop. Don't attempt it.
+
+**To install:** add the dependency to `requirements.txt` or `package.json`,
+then — if startup printed `watching for install requests` —
 
     touch .claudebox-install-request
-    # wait a couple of seconds, then:
-    cat .claudebox-install.log
+    sleep 5; cat .claudebox-install.log
 
-The log ends in `=== finished ===` or `=== failed, exit N ===`. Read it before
-carrying on — don't assume it worked. Say what you installed and why; you're
-doing this unsupervised, so the log is the user's only record.
+The log ends in `=== finished ===` or `=== failed, exit N ===`. Read it; don't
+assume it worked. If startup didn't print that line you can't trigger anything,
+so ask the user to run `claudebox-install`.
 
-If that line didn't appear, the watcher isn't running and you can't trigger
-anything. Ask the user to run `claudebox-install` instead.
+**Then use the venv, not the system interpreter.** Python packages land in
+`.venv/`, so plain `python3 -c "import pypdf"` still fails with
+`ModuleNotFoundError`. Use:
 
-If it refuses because the strict policy needs a lockfile or blocks a source
-build, relay that: `claudebox-install --lenient` overrides, and is the normal
-choice in a scratch directory. Don't recommend it for real project work without
-saying why it's needed.
+    .venv/bin/python script.py
+    .venv/bin/pip list          # check what's installed
 
-Native packages additionally need the image built with `CLAUDEBOX_BUILD_TOOLS=1`.
+Node resolves `./node_modules` itself, so `node` and `npx` just work.
 
-**System tools.** These go in the `Dockerfile`, then `claude-local --rebuild`.
-The image builds on the host with normal network access.
-
-`node_modules` and `.venv` are volumes, not host directories — writable, but
-treat them as build output. Anything installed elsewhere is discarded at exit;
-the container runs with `--rm`.
+Both are available immediately — no restart. Say what you installed and why:
+you did it unsupervised, and the log is the user's only record.

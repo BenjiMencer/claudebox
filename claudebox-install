@@ -99,64 +99,77 @@ CHOWN="chown -R ${CCAGENT_UID}:${CCAGENT_GID}"
 
 sidecar() { docker run --rm --entrypoint sh "$@"; }
 
+# Lenient installs go into the bind-mounted directory; strict ones into a
+# volume. A volume is only mounted when the container starts, so a mid-session
+# install into a fresh one is invisible to the running agent - which would
+# defeat the point of letting it trigger installs at all. Under a sandbox root
+# the agent can already write anywhere in this directory, so the volume was not
+# isolating anything there in the first place.
+drop_shadowing_volume() {
+  claudebox_volume_exists "$1" || return 0
+  docker volume rm "$1" > /dev/null
+  echo "claudebox-install: removed volume $1 (it would shadow the directory)"
+}
+
 # ------------------------------------------------------------------ node ---
 if [ -n "$CLAUDEBOX_VOL_NODE" ]; then
-  docker volume create "$CLAUDEBOX_VOL_NODE" > /dev/null
-
   if [ "$POLICY" = lenient ]; then
-    # Project mounted read-write so npm can write the lockfile it resolves.
-    sidecar \
-      -v "$PWD":/work \
-      -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
-      -w /work "$IMAGE" -c "npm install && $CHOWN /work/node_modules"
+    drop_shadowing_volume "$CLAUDEBOX_VOL_NODE"
+    sidecar -v "$PWD":/work -w /work "$IMAGE" -c "npm install"
+    echo "claudebox-install: node deps ready in ./node_modules"
   else
     if [ ! -f "$PWD/package-lock.json" ]; then
       echo "claudebox-install: no package-lock.json, and the strict policy needs one." >&2
       echo "  Run with --lenient to resolve and write it." >&2
       exit 1
     fi
+    docker volume create "$CLAUDEBOX_VOL_NODE" > /dev/null
     sidecar \
       -v "$PWD/package.json":/work/package.json:ro \
       -v "$PWD/package-lock.json":/work/package-lock.json:ro \
       -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
       -w /work "$IMAGE" -c "npm ci --ignore-scripts && $CHOWN /work/node_modules"
+    echo "claudebox-install: node deps ready in $CLAUDEBOX_VOL_NODE"
+    NEEDS_RESTART=1
   fi
-
-  echo "claudebox-install: node deps ready in $CLAUDEBOX_VOL_NODE"
 fi
 
 # ---------------------------------------------------------------- python ---
 if [ -n "$CLAUDEBOX_VOL_PY" ]; then
-  docker volume create "$CLAUDEBOX_VOL_PY" > /dev/null
   VENV="/work/.venv/bin"
+  [ -f "$PWD/requirements.txt" ] && PIP_SRC="-r requirements.txt" || PIP_SRC="."
 
-  if [ -f "$PWD/requirements.txt" ]; then
-    # requirements.txt is pure input, so it stays read-only under either policy.
-    # --only-binary blocks source distributions, which run setup.py on install.
-    [ "$POLICY" = lenient ] && PIP_FLAGS="" || PIP_FLAGS="--only-binary :all:"
+  if [ "$POLICY" = lenient ]; then
+    drop_shadowing_volume "$CLAUDEBOX_VOL_PY"
+    sidecar -v "$PWD":/work -w /work "$IMAGE" -c \
+      "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
+         && $VENV/pip install $PIP_SRC"
+    echo "claudebox-install: python deps ready in ./.venv"
+  else
+    # Building a pyproject is a source build by definition, so there is no
+    # strict version of it. --only-binary blocks source distributions, which
+    # execute setup.py at install time.
+    if [ "$PIP_SRC" = "." ]; then
+      echo "claudebox-install: pyproject.toml needs a source build, which the" >&2
+      echo "  strict policy disallows. Use --lenient, or add a requirements.txt." >&2
+      exit 1
+    fi
+    docker volume create "$CLAUDEBOX_VOL_PY" > /dev/null
     sidecar \
       -v "$PWD/requirements.txt":/work/requirements.txt:ro \
       -v "$CLAUDEBOX_VOL_PY":/work/.venv \
       -w /work "$IMAGE" -c \
       "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
-         && $VENV/pip install $PIP_FLAGS -r requirements.txt && $CHOWN /work/.venv"
-  else
-    # Installing a pyproject means building it, which is a source build by
-    # definition - there is no strict version of this.
-    if [ "$POLICY" != lenient ]; then
-      echo "claudebox-install: pyproject.toml needs a source build, which the" >&2
-      echo "  strict policy disallows. Use --lenient, or add a requirements.txt." >&2
-      exit 1
-    fi
-    sidecar \
-      -v "$PWD":/work \
-      -v "$CLAUDEBOX_VOL_PY":/work/.venv \
-      -w /work "$IMAGE" -c \
-      "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
-         && $VENV/pip install . && $CHOWN /work/.venv"
+         && $VENV/pip install --only-binary :all: -r requirements.txt \
+         && $CHOWN /work/.venv"
+    echo "claudebox-install: python deps ready in $CLAUDEBOX_VOL_PY"
+    NEEDS_RESTART=1
   fi
-
-  echo "claudebox-install: python deps ready in $CLAUDEBOX_VOL_PY"
 fi
 
-echo "claudebox-install: done. Start or restart claude-local to pick them up."
+if [ -n "${NEEDS_RESTART:-}" ]; then
+  echo "claudebox-install: done. Restart claude-local to pick these up - a volume"
+  echo "  is only mounted when the container starts."
+else
+  echo "claudebox-install: done. Available immediately; no restart needed."
+fi
