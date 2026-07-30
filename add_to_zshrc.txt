@@ -81,6 +81,37 @@ claude-local() {
   dir_slug="$(basename "$PWD" | sed 's/[^a-zA-Z0-9_.-]/_/g')"
   container_name="cc-agent-${dir_slug}"
 
+  # Sandbox roots: where the agent may run without permission prompts. The
+  # container mounts the current directory as its only writable surface, so
+  # scoping bypass by launch directory makes the blast radius exactly the
+  # thing you already decided was disposable. Everywhere else prompts.
+  #
+  # Override with CLAUDE_SANDBOX_ROOTS (colon-separated). That is a
+  # convenience, not a security boundary: anything that can set your
+  # environment can grant itself bypass, so keep the default narrow.
+  #
+  # Do NOT add the claudebox repo itself - bypass there would let the agent
+  # rewrite this function and widen its own allowlist.
+  local -a perm_args sandbox_roots
+  perm_args=()
+  sandbox_roots=(${(s.:.)${CLAUDE_SANDBOX_ROOTS:-$HOME/claude-sandbox}})
+
+  # Resolve symlinks on both sides, so a link into a sandbox root - or out of
+  # one - can't change the answer. :A does this in zsh.
+  local current_dir="${PWD:A}" root resolved_root
+  for root in $sandbox_roots; do
+    [[ -n "$root" && -d "$root" ]] || continue
+    resolved_root="${root:A}"
+    # Exact match or a path beneath it. The /* form stops a sibling like
+    # /tmp/sandbox-evil from matching a /tmp/sandbox root.
+    if [[ "$current_dir" == "$resolved_root" || "$current_dir" == "$resolved_root"/* ]]; then
+      perm_args=(--permission-mode bypassPermissions)
+      echo "claude-local: $current_dir is under sandbox root $resolved_root"
+      echo "claude-local: starting WITHOUT permission prompts (bypassPermissions)."
+      break
+    fi
+  done
+
   # --rm only cleans up the container on a normal exit. A crashed terminal,
   # sleeping Mac, or Docker Desktop restart can leave a stale container with
   # this name behind, which makes the `docker run --name` below fail with
@@ -110,5 +141,5 @@ claude-local() {
     -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy}" \
     -v "$PWD":/home/ccagent/work \
     -w /home/ccagent/work \
-    "$image" "$@"
+    "$image" "${perm_args[@]}" "$@"
 }

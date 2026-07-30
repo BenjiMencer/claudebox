@@ -99,6 +99,45 @@ behind by a crashed terminal, a sleeping Mac, or a Docker Desktop restart
 automatically if it's stopped, or tells you how to attach to or remove it if
 it's still running.
 
+## Sandbox roots — running without permission prompts
+
+By default the agent asks before editing files or running commands. You can
+skip those prompts, but only from directories you have explicitly designated
+as disposable. Both `run.sh` and `claude-local` compare the launch directory
+against a list of sandbox roots, and pass `--permission-mode bypassPermissions`
+only when it matches:
+
+    SANDBOX_ROOTS="${CLAUDE_SANDBOX_ROOTS:-$HOME/claude-sandbox}"
+
+The default root is `~/claude-sandbox`, which is not created for you — until it
+exists, nothing matches and every launch prompts normally. Override the list
+per-call with a colon-separated `CLAUDE_SANDBOX_ROOTS`:
+
+    CLAUDE_SANDBOX_ROOTS="$HOME/scratch:$HOME/throwaway" claude-local
+
+A launch that matches prints two lines saying so before the container starts.
+Matching is on the resolved path — a symlink into a sandbox root counts as
+inside, and one pointing out of it counts as outside — and a root only matches
+that directory and things beneath it, so `/tmp/sandbox-evil` does not match a
+`/tmp/sandbox` root.
+
+Why tie it to the directory: the container mounts your current directory as its
+only writable surface. Scoping bypass by launch location makes the blast radius
+exactly the thing you already decided was disposable.
+
+Two caveats worth stating plainly:
+
+- `CLAUDE_SANDBOX_ROOTS` is a convenience, not a security boundary. Anything
+  that can set your environment can grant itself bypass. Keep the default
+  narrow, and don't export it globally in your shell profile.
+- **Do not add this repo to the list.** Bypass here would let the agent rewrite
+  `run.sh` and widen its own allowlist.
+
+Auto mode (`--permission-mode auto`), which reviews actions with a classifier
+instead of skipping checks, is *not* available in this setup: the classifier
+requires a first-party Claude model, and this container routes inference to a
+local model. Bypass is all-or-nothing, which is why it is scoped by directory.
+
 ## Files
 
 - `Dockerfile` — builds the agent image (Claude Code + scanner skill + guidance).
