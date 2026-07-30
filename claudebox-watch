@@ -11,13 +11,23 @@
 # with you; this loop notices, runs claudebox-install there, and writes the
 # output somewhere the agent can read back.
 #
-# The split that makes this safe: the agent chooses WHEN, never WHAT. The
-# command run here is fixed. Handing the agent a way to name the command, or the
-# Docker socket to run it itself, would be a container escape to host root.
+# An empty request installs what the manifests declare. A request naming
+# packages adds just those, leaving the manifests alone - the agent's way of
+# saying "I need this for the next few minutes" rather than "this folder
+# depends on it". Names are validated by claudebox-install before they reach a
+# shell; they arrive from the agent, so they are untrusted input.
 #
-# It still chooses the manifest, so it chooses which packages get installed -
-# a confused-deputy hole by construction. That is why the launchers only start
-# this under a sandbox root, where the blast radius is already disposable.
+# What the agent controls, precisely: when this fires, and which packages get
+# named. What it does not control is the command - that is fixed here, and the
+# names are validated against a plain-package-spec pattern before they reach a
+# shell. Letting it name the command, or handing it the Docker socket to run
+# one itself, would be a container escape to host root.
+#
+# Choosing the packages is still a confused-deputy hole by construction: an
+# injected page could talk the agent into installing something. It was already
+# true when the manifest was the only input, since the agent writes that too.
+# The bound on it is that the launchers start this only under a sandbox root,
+# where the blast radius is already disposable.
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -31,6 +41,7 @@ while true; do
   if [ -e "$REQUEST" ]; then
     # Clear the request before acting on it. Clearing afterwards would re-run
     # forever if the install crashed the loop.
+    requested="$(tr '\n' ' ' < "$REQUEST" 2>/dev/null || true)"
     rm -f "$REQUEST"
 
     # Capture the status explicitly rather than leaning on set -e. A compound
@@ -39,14 +50,25 @@ while true; do
     # would have read as "dependencies are ready".
     (
       cd "$PROJECT_DIR" || exit 1
-      echo "=== claudebox-install, requested by the agent ==="
+      if [ -n "$requested" ]; then
+        echo "=== claudebox-install $requested, requested by the agent ==="
+      else
+        echo "=== claudebox-install, requested by the agent ==="
+      fi
       # --lenient explicitly, rather than letting the installer re-derive the
       # policy. The launchers only start this under a sandbox root, so the
       # answer is already known - and re-deriving it here depends on
       # CLAUDE_SANDBOX_ROOTS having been exported, which would otherwise let
       # the launcher and the installer disagree about the same directory.
+      #
+      # $requested is unquoted so several names split into separate arguments.
+      # Globbing is off so a name containing * cannot expand against the
+      # project, and claudebox-install validates each name before it reaches a
+      # shell.
       status=0
-      "$REPO_DIR/claudebox-install" --lenient || status=$?
+      set -f
+      "$REPO_DIR/claudebox-install" --lenient $requested || status=$?
+      set +f
       if [ "$status" -eq 0 ]; then
         echo "=== finished ==="
       else

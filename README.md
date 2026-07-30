@@ -156,10 +156,22 @@ DNS, and the agent can't `sudo`. Run this on the host instead, from the project
 directory:
 
 ```bash
-claudebox-install            # install, using the policy for this directory
-claudebox-install --lenient  # or --strict, to override that policy
+claudebox-install            # install what the manifests declare
+claudebox-install pypdf      # add a package without touching the manifests
+claudebox-install --lenient  # or --strict, to override this directory's policy
 claudebox-install --clean    # discard this project's dependency volumes
 ```
+
+**Two tiers.** `requirements.txt` and `package.json` are the *declared* set —
+what the folder is meant to have. They're installed by a bare
+`claudebox-install`, and reinstalled whenever the volumes are rebuilt, so they
+survive `--clean` and move with the repo. Naming packages on the command line
+adds them to the environment for the work in hand without recording them
+anywhere: available immediately, gone after a `--clean`, absent on another
+machine. Promote one by writing it into the manifest and installing again.
+
+The agent is told to use the declared set only for dependencies worth keeping
+across sessions, and to add anything exploratory on the fly.
 
 A throwaway container fetches the packages into a Docker named volume, which the
 launchers attach at `~/node_modules` and `~/venv` inside the container. It gets
@@ -207,15 +219,22 @@ build runs on the host with ordinary network access.
 
 ### Letting the agent install for itself
 
-Under a sandbox root, the launchers also start a watcher. The agent creates
+Under a sandbox root, the launchers also start a watcher. The agent writes
 `.claudebox-install-request`; the watcher runs `claudebox-install` in that
-directory and writes the output to `.claudebox-install.log`, which the agent
-reads back. No network for the agent, no Docker socket, and the command it
-triggers is fixed — it chooses *when*, never *what*.
+directory and puts the output in `.claudebox-install.log` for it to read back.
+An empty request installs the declared set; a request naming packages adds just
+those. No network for the agent, and no Docker socket.
 
-It does choose the manifest, so it chooses which packages get installed. That's
-a confused-deputy hole by construction, which is why this only runs under a
-sandbox root. `CLAUDEBOX_NO_WATCH=1` disables it.
+What it controls is when this fires and which packages are named — not the
+command, which is fixed here, and not the shell, since names are validated
+against a plain-package-spec pattern first. `pypdf; touch /tmp/x` is rejected
+rather than quoted around.
+
+Choosing the packages is a confused-deputy hole by construction: an injected
+page could talk the agent into installing something. That was already true when
+the manifest was the only input, since the agent writes that too. The bound on
+it is that this runs only under a sandbox root. `CLAUDEBOX_NO_WATCH=1` disables
+it.
 
 Installs that happen mid-session scroll past while the agent is talking, so the
 launcher points at the log on exit. That log is your record of what got pulled

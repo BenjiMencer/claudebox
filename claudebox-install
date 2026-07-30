@@ -2,10 +2,17 @@
 # Install a project's dependencies for claudebox, without giving the agent
 # network access and without putting package code on your host filesystem.
 #
-#   claudebox-install            install, using the policy for this directory
+#   claudebox-install            install what the manifests declare
+#   claudebox-install pypdf ...   add packages without touching the manifests
 #   claudebox-install --strict   force the strict policy
 #   claudebox-install --lenient  force the lenient policy
 #   claudebox-install --clean    delete this project's dependency volumes
+#
+# Two tiers, on purpose. requirements.txt / package.json are the declared set:
+# what a folder is meant to have, reinstalled whenever the volumes are rebuilt.
+# Named packages are added to the environment for the work in hand and are not
+# recorded anywhere, so they don't survive a --clean or reach another machine.
+# Promote something by writing it into the manifest and installing again.
 #
 # A throwaway container fetches the packages and writes them into a Docker
 # named volume, which the launchers mount over node_modules / .venv. It gets no
@@ -34,14 +41,30 @@ source "$REPO_DIR/sandbox-gate.sh"
 IMAGE="${CLAUDEBOX_IMAGE:-cc-agent}"
 FORCE_POLICY=""
 CLEAN=0
+PKGS=""
+
+# A package name reaches a shell inside the sidecar, and under the watcher it
+# originates with the agent - so it is untrusted input. Allow only what a real
+# requirement spec needs (pypdf, pypdf==6.14.2, requests[socks], numpy>=1.20)
+# and reject everything else rather than trying to quote around it.
+valid_pkg() {
+  printf '%s' "$1" | grep -qE '^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?([=<>!~]{1,2}[A-Za-z0-9._*-]+)?$'
+}
 
 for arg in "$@"; do
   case "$arg" in
     --strict)  FORCE_POLICY=strict ;;
     --lenient) FORCE_POLICY=lenient ;;
     --clean)   CLEAN=1 ;;
-    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) echo "claudebox-install: unknown option '$arg'" >&2; exit 1 ;;
+    -h|--help) sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "claudebox-install: unknown option '$arg'" >&2; exit 1 ;;
+    *)
+      valid_pkg "$arg" || {
+        echo "claudebox-install: refusing '$arg' - not a plain package spec." >&2
+        exit 1
+      }
+      PKGS="$PKGS $arg"
+      ;;
   esac
 done
 
@@ -50,9 +73,12 @@ docker info > /dev/null 2>&1 || { echo "claudebox-install: Docker isn't running.
 
 claudebox_deps_volumes
 
-if [ "$CLAUDEBOX_HAS_NODE" = 0 ] && [ "$CLAUDEBOX_HAS_PY" = 0 ]; then
+if [ -n "$PKGS" ]; then
+  ADHOC=1
+elif [ "$CLAUDEBOX_HAS_NODE" = 0 ] && [ "$CLAUDEBOX_HAS_PY" = 0 ]; then
   echo "claudebox-install: nothing to install here." >&2
   echo "  Looked for package.json, requirements.txt, pyproject.toml in $PWD" >&2
+  echo "  To add a package without a manifest: claudebox-install <name>" >&2
   exit 1
 fi
 
@@ -121,6 +147,28 @@ sync_into_running_container() {
   docker exec -u root "$sync_container" \
     chown -R "${CCAGENT_UID}:${CCAGENT_GID}" "$sync_dest"
 }
+
+# ----------------------------------------------------------------- ad-hoc ---
+# Named packages. Note what is NOT mounted here: the project. A manifest install
+# needs the project to read (and sometimes write) manifests, but this needs only
+# the name, so the sidecar gets no view of your source at all.
+if [ -n "${ADHOC:-}" ]; then
+  claudebox_ensure_volume "$CLAUDEBOX_VOL_PY" "$IMAGE"
+  VENV="${CLAUDEBOX_DEPS_MOUNT_PY}/bin"
+  echo "claudebox-install: adding${PKGS} to the environment (not to any manifest)"
+
+  sidecar \
+    -v "$CLAUDEBOX_VOL_PY":"$CLAUDEBOX_DEPS_MOUNT_PY" \
+    "$IMAGE" -c \
+    "[ -x $VENV/pip ] || python3 -m venv $CLAUDEBOX_DEPS_MOUNT_PY \
+       && $VENV/pip install -q --upgrade pip \
+       && $VENV/pip install$PKGS \
+       && $CHOWN $CLAUDEBOX_DEPS_MOUNT_PY"
+
+  sync_into_running_container "$CLAUDEBOX_VOL_PY" "$CLAUDEBOX_DEPS_MOUNT_PY"
+  echo "claudebox-install: done. Available now - no restart."
+  exit 0
+fi
 
 # ------------------------------------------------------------------ node ---
 if [ "$CLAUDEBOX_HAS_NODE" = 1 ]; then

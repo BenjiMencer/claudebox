@@ -53,11 +53,21 @@ there's a choice, take the library:
 
 If you genuinely need a system binary, say so and stop. Don't attempt it.
 
-**To install:** add the dependency to `requirements.txt` or `package.json`,
-then — if startup printed `watching for install requests` —
+**To install**, if startup printed `watching for install requests`:
 
-    touch .claudebox-install-request
+    echo "pypdf" > .claudebox-install-request     # just for this session
     sleep 5; cat .claudebox-install.log
+
+Decide which tier the package belongs to:
+
+- **Exploring, or need it for the task in hand** — name it in the request, as
+  above. It isn't recorded anywhere, and it's gone once the volumes are rebuilt.
+  This is the default; prefer it.
+- **The project genuinely depends on it** — add it to `requirements.txt` (or
+  `package.json`) first, then send an *empty* request (`touch
+  .claudebox-install-request`) to install the declared set. Only do this for
+  something the folder should still have next session, on another machine. The
+  manifest is a claim about the project, not a scratchpad.
 
 The log ends in `=== finished ===` or `=== failed, exit N ===`. Read it; don't
 assume it worked. If startup didn't print that line you can't trigger anything,
