@@ -118,9 +118,16 @@ location makes the blast radius exactly the thing you already called disposable.
 The same signal also relaxes the [install policy](#installing-packages).
 
 The default root is `~/claude-sandbox`, and it isn't created for you — until it
-exists, nothing matches and every launch prompts. Override per-call:
+exists, nothing matches and every launch prompts. To use different ones, export
+them from `~/.zshrc`, colon-separated:
 
-    CLAUDE_SANDBOX_ROOTS="$HOME/scratch:$HOME/throwaway" claude-local
+    export CLAUDE_SANDBOX_ROOTS="$HOME/scratch:$HOME/throwaway"
+
+`export` matters: `claudebox-install` is a separate process, so without it the
+launcher and the installer read different lists and disagree about the same
+directory — you get a session with no permission prompts but a strict install
+policy. The directories have to exist, too; a root that isn't there matches
+nothing and fails closed with no warning.
 
 A matching launch says so before the container starts. Matching is on the
 resolved path, so a symlink into a root counts as inside and one pointing out
@@ -133,8 +140,7 @@ than its twin is the bad kind of bug.
 Two caveats:
 
 - `CLAUDE_SANDBOX_ROOTS` is a convenience, not a security boundary. Anything
-  that can set your environment can grant itself bypass. Keep it narrow, and
-  don't export it globally.
+  that can set your environment can grant itself bypass. Keep the list narrow.
 - **Never list this repo.** Bypass here would let the agent rewrite the
   launchers and widen its own allowlist.
 

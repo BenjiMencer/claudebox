@@ -40,8 +40,13 @@ while true; do
     (
       cd "$PROJECT_DIR" || exit 1
       echo "=== claudebox-install, requested by the agent ==="
+      # --lenient explicitly, rather than letting the installer re-derive the
+      # policy. The launchers only start this under a sandbox root, so the
+      # answer is already known - and re-deriving it here depends on
+      # CLAUDE_SANDBOX_ROOTS having been exported, which would otherwise let
+      # the launcher and the installer disagree about the same directory.
       status=0
-      "$REPO_DIR/claudebox-install" || status=$?
+      "$REPO_DIR/claudebox-install" --lenient || status=$?
       if [ "$status" -eq 0 ]; then
         echo "=== finished ==="
       else

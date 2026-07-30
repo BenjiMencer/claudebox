@@ -28,7 +28,11 @@ CLAUDEBOX_REPO="$HOME/claudebox"
 # Directories where the agent may run without permission prompts. Optional -
 # defaults to ~/claude-sandbox. Colon-separated for several.
 #
-# Uncomment to override, but keep it narrow, and never list $CLAUDEBOX_REPO
-# itself: bypass there would let the agent rewrite its own allowlist.
+# The directories must exist; a root that isn't there matches nothing. Keep the
+# list narrow, and never include $CLAUDEBOX_REPO itself - bypass there would let
+# the agent rewrite its own allowlist.
+#
+# Must be exported: claudebox-install is a separate process, and if it can't see
+# this list it will disagree with the launcher about the same directory.
 #
 # export CLAUDE_SANDBOX_ROOTS="$HOME/claude-sandbox:$HOME/scratch"
