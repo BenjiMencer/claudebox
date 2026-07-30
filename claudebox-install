@@ -2,15 +2,26 @@
 # Install a project's dependencies for claudebox, without giving the agent
 # network access and without putting package code on your host filesystem.
 #
-#   claudebox-install                 install from the lockfile / requirements
-#   claudebox-install --allow-scripts permit package lifecycle scripts to run
-#   claudebox-install --update-lock   regenerate package-lock.json (see below)
-#   claudebox-install --clean         delete this project's dependency volumes
+#   claudebox-install            install, using the policy for this directory
+#   claudebox-install --strict   force the strict policy
+#   claudebox-install --lenient  force the lenient policy
+#   claudebox-install --clean    delete this project's dependency volumes
 #
-# How it works: a throwaway container fetches the packages and writes them into
-# a Docker named volume, which claudebox mounts over node_modules / .venv. That
-# container is given the manifest read-only and nothing else - no source, no
-# SCANNER_TOKEN, no API key - and it exits when the install finishes.
+# A throwaway container fetches the packages and writes them into a Docker
+# named volume, which the launchers mount over node_modules / .venv. It gets no
+# SCANNER_TOKEN, no API key, and no added capabilities, and it exits when the
+# install finishes. The agent's own network posture is untouched.
+#
+# Policy follows the sandbox gate, the same signal that decides permission
+# prompts (see sandbox-gate.sh):
+#
+#   sandbox root  lenient  lifecycle scripts run, lockfile written if missing,
+#                          project mounted read-write
+#   elsewhere     strict   scripts disabled, lockfile required, only the
+#                          manifest is mounted, read-only
+#
+# Leniency lands where the blast radius is already disposable, and real projects
+# keep the guardrails, without a flag to remember in either case.
 #
 # The agent cannot run this. Letting it would mean handing it the Docker socket,
 # which is a container escape to host root. You are the trigger on purpose.
@@ -18,18 +29,18 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 source "$REPO_DIR/deps-volumes.sh"
+source "$REPO_DIR/sandbox-gate.sh"
 
 IMAGE="${CLAUDEBOX_IMAGE:-cc-agent}"
-ALLOW_SCRIPTS=0
-UPDATE_LOCK=0
+FORCE_POLICY=""
 CLEAN=0
 
 for arg in "$@"; do
   case "$arg" in
-    --allow-scripts) ALLOW_SCRIPTS=1 ;;
-    --update-lock)   UPDATE_LOCK=1 ;;
-    --clean)         CLEAN=1 ;;
-    -h|--help)       sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --strict)  FORCE_POLICY=strict ;;
+    --lenient) FORCE_POLICY=lenient ;;
+    --clean)   CLEAN=1 ;;
+    -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "claudebox-install: unknown option '$arg'" >&2; exit 1 ;;
   esac
 done
@@ -48,9 +59,9 @@ fi
 if [ "$CLEAN" = 1 ]; then
   for vol in "$CLAUDEBOX_VOL_NODE" "$CLAUDEBOX_VOL_PY"; do
     [ -n "$vol" ] || continue
-    if claudebox_volume_exists "$vol"; then
-      docker volume rm "$vol" > /dev/null && echo "claudebox-install: removed $vol"
-    fi
+    claudebox_volume_exists "$vol" \
+      && docker volume rm "$vol" > /dev/null \
+      && echo "claudebox-install: removed $vol"
   done
   # Mounting a volume over a subpath of a bind mount leaves an empty directory
   # behind on the host. Tidy it up, but only while it is still empty.
@@ -66,102 +77,86 @@ docker image inspect "$IMAGE" > /dev/null 2>&1 || {
   exit 1
 }
 
+if [ -n "$FORCE_POLICY" ]; then
+  POLICY="$FORCE_POLICY"
+else
+  claudebox_check_sandbox
+  [ "$CLAUDEBOX_BYPASS" = 1 ] && POLICY=lenient || POLICY=strict
+fi
+echo "claudebox-install: $POLICY policy"
+
 # The sidecar runs the SAME image as the agent, so interpreters and ABI match
 # exactly. A venv built by a different Python, or a native module built against
 # a different libc, is visible inside claudebox but doesn't load.
 #
-# Ownership: a fresh named volume is root-owned, and the agent runs as an
-# unprivileged user, so the install runs as root and hands the tree over at the
-# end. Read the uid out of the image rather than hardcoding it - the base image
-# already occupies 1000, so ccagent is not the number you'd guess.
+# Ownership: a fresh named volume is root-owned and the agent runs unprivileged,
+# so the install runs as root and hands the tree over at the end. Read the uid
+# from the image rather than hardcoding it - the base image already occupies
+# 1000, so ccagent is not the number you would guess.
 CCAGENT_UID="$(docker run --rm --entrypoint sh "$IMAGE" -c 'id -u ccagent')"
 CCAGENT_GID="$(docker run --rm --entrypoint sh "$IMAGE" -c 'id -g ccagent')"
+CHOWN="chown -R ${CCAGENT_UID}:${CCAGENT_GID}"
 
-# Deliberately minimal: no -e SCANNER_TOKEN, no -e ANTHROPIC_API_KEY, no added
-# capabilities. If a package does run code, it runs somewhere with nothing worth
-# taking and no route to the project.
-sidecar() {
-  docker run --rm --entrypoint sh "$@"
-}
+sidecar() { docker run --rm --entrypoint sh "$@"; }
 
 # ------------------------------------------------------------------ node ---
 if [ -n "$CLAUDEBOX_VOL_NODE" ]; then
   docker volume create "$CLAUDEBOX_VOL_NODE" > /dev/null
 
-  if [ "$UPDATE_LOCK" = 1 ]; then
-    # Generating a lockfile means writing into the project, so this mode mounts
-    # the directory read-write. It is the one mode that can touch your files -
-    # hence a separate flag rather than a silent fallback.
-    # No deps volume here on purpose. Resolving a lockfile doesn't need
-    # node_modules, and mounting a volume over a subpath of a bind mount makes
-    # Docker create that directory on the host.
-    echo "claudebox-install: regenerating package-lock.json (project mounted read-write)"
+  if [ "$POLICY" = lenient ]; then
+    # Project mounted read-write so npm can write the lockfile it resolves.
     sidecar \
       -v "$PWD":/work \
-      -w /work "$IMAGE" -c \
-      "npm install --package-lock-only --ignore-scripts"
-    echo "claudebox-install: lockfile written. Re-run without --update-lock to install."
-    exit 0
-  fi
-
-  if [ ! -f "$PWD/package-lock.json" ]; then
-    echo "claudebox-install: no package-lock.json." >&2
-    echo "  Run 'claudebox-install --update-lock' to generate one first." >&2
-    echo "  (Installing without a lockfile would resolve versions unpinned.)" >&2
-    exit 1
-  fi
-
-  if [ "$ALLOW_SCRIPTS" = 1 ]; then
-    NPM_CMD="npm ci"
-    echo "claudebox-install: node — lifecycle scripts ENABLED (--allow-scripts)"
+      -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
+      -w /work "$IMAGE" -c "npm install && $CHOWN /work/node_modules"
   else
-    NPM_CMD="npm ci --ignore-scripts"
-    echo "claudebox-install: node — installing from lockfile, scripts disabled"
+    if [ ! -f "$PWD/package-lock.json" ]; then
+      echo "claudebox-install: no package-lock.json, and the strict policy needs one." >&2
+      echo "  Run with --lenient to resolve and write it." >&2
+      exit 1
+    fi
+    sidecar \
+      -v "$PWD/package.json":/work/package.json:ro \
+      -v "$PWD/package-lock.json":/work/package-lock.json:ro \
+      -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
+      -w /work "$IMAGE" -c "npm ci --ignore-scripts && $CHOWN /work/node_modules"
   fi
 
-  sidecar \
-    -v "$PWD/package.json":/work/package.json:ro \
-    -v "$PWD/package-lock.json":/work/package-lock.json:ro \
-    -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
-    -w /work "$IMAGE" -c \
-    "$NPM_CMD && chown -R ${CCAGENT_UID}:${CCAGENT_GID} /work/node_modules"
-
-  echo "claudebox-install: node deps ready in volume $CLAUDEBOX_VOL_NODE"
+  echo "claudebox-install: node deps ready in $CLAUDEBOX_VOL_NODE"
 fi
 
 # ---------------------------------------------------------------- python ---
 if [ -n "$CLAUDEBOX_VOL_PY" ]; then
   docker volume create "$CLAUDEBOX_VOL_PY" > /dev/null
+  VENV="/work/.venv/bin"
 
-  PIP_MOUNTS=""
   if [ -f "$PWD/requirements.txt" ]; then
-    PIP_MOUNTS="-v $PWD/requirements.txt:/work/requirements.txt:ro"
-    PIP_SRC="-r requirements.txt"
+    # requirements.txt is pure input, so it stays read-only under either policy.
+    # --only-binary blocks source distributions, which run setup.py on install.
+    [ "$POLICY" = lenient ] && PIP_FLAGS="" || PIP_FLAGS="--only-binary :all:"
+    sidecar \
+      -v "$PWD/requirements.txt":/work/requirements.txt:ro \
+      -v "$CLAUDEBOX_VOL_PY":/work/.venv \
+      -w /work "$IMAGE" -c \
+      "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
+         && $VENV/pip install $PIP_FLAGS -r requirements.txt && $CHOWN /work/.venv"
   else
-    PIP_MOUNTS="-v $PWD/pyproject.toml:/work/pyproject.toml:ro"
-    PIP_SRC="."
+    # Installing a pyproject means building it, which is a source build by
+    # definition - there is no strict version of this.
+    if [ "$POLICY" != lenient ]; then
+      echo "claudebox-install: pyproject.toml needs a source build, which the" >&2
+      echo "  strict policy disallows. Use --lenient, or add a requirements.txt." >&2
+      exit 1
+    fi
+    sidecar \
+      -v "$PWD":/work \
+      -v "$CLAUDEBOX_VOL_PY":/work/.venv \
+      -w /work "$IMAGE" -c \
+      "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
+         && $VENV/pip install . && $CHOWN /work/.venv"
   fi
 
-  if [ "$ALLOW_SCRIPTS" = 1 ]; then
-    # Source distributions execute setup.py at install time.
-    PIP_FLAGS=""
-    echo "claudebox-install: python — source builds ENABLED (--allow-scripts)"
-  else
-    PIP_FLAGS="--only-binary :all:"
-    echo "claudebox-install: python — wheels only, no source builds"
-  fi
-
-  # shellcheck disable=SC2086
-  sidecar \
-    $PIP_MOUNTS \
-    -v "$CLAUDEBOX_VOL_PY":/work/.venv \
-    -w /work "$IMAGE" -c \
-    "python3 -m venv /work/.venv \
-       && /work/.venv/bin/pip install --upgrade pip > /dev/null \
-       && /work/.venv/bin/pip install $PIP_FLAGS $PIP_SRC \
-       && chown -R ${CCAGENT_UID}:${CCAGENT_GID} /work/.venv"
-
-  echo "claudebox-install: python deps ready in volume $CLAUDEBOX_VOL_PY"
+  echo "claudebox-install: python deps ready in $CLAUDEBOX_VOL_PY"
 fi
 
 echo "claudebox-install: done. Start or restart claude-local to pick them up."

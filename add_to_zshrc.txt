@@ -17,7 +17,7 @@ SAVEHIST=10000
 # Where you cloned the repo. This is the only path to edit — everything below
 # is derived from it.
 # ---------------------------------------------------------------------------
-CLAUDEBOX_REPO="$HOME/claude-docker"
+CLAUDEBOX_REPO="$HOME/claudebox"
 
 # Source the function from the repo rather than defining it here, so a
 # `git pull` reaches it. Don't paste the function body in: a copy living in

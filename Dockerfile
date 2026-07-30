@@ -7,6 +7,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       iptables curl ca-certificates iproute2 gosu python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
+# Compilers for packages with native components (node-gyp addons, C extensions).
+# Off by default because it roughly doubles the image, and lifecycle scripts are
+# disabled under the strict install policy anyway. Turn on with:
+#   CLAUDEBOX_BUILD_TOOLS=1 claude-local --rebuild
+ARG WITH_BUILD_TOOLS=0
+RUN if [ "$WITH_BUILD_TOOLS" = "1" ]; then \
+      apt-get update && apt-get install -y --no-install-recommends \
+        build-essential python3-dev \
+      && rm -rf /var/lib/apt/lists/*; \
+    fi
+
 # Install Claude Code.
 RUN npm install -g @anthropic-ai/claude-code
 

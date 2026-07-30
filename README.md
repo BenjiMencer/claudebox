@@ -50,7 +50,7 @@ Setup — **source it from `~/.zshrc`, don't paste it in**:
 
 ```bash
 cat add_to_zshrc.txt >> ~/.zshrc
-echo 'SCANNER_TOKEN=<your token>' > ~/claude-docker/.env
+echo 'SCANNER_TOKEN=<your token>' > ~/claudebox/.env
 source ~/.zshrc
 ```
 
@@ -58,7 +58,7 @@ What that appends is a repo path and a `source` of `claude-local.zsh` (plus
 some optional shell niceties you can trim):
 
 ```zsh
-CLAUDEBOX_REPO="$HOME/claude-docker"
+CLAUDEBOX_REPO="$HOME/claudebox"
 [ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
 ```
 
@@ -111,94 +111,84 @@ it's still running.
 
 ## Sandbox roots — running without permission prompts
 
-By default the agent asks before editing files or running commands. You can
-skip those prompts, but only from directories you have explicitly designated
-as disposable. Both launchers source the same gate from `sandbox-gate.sh`,
-compare the launch directory against a list of sandbox roots, and pass
-`--permission-mode bypassPermissions` only when it matches:
+By default the agent asks before editing files or running commands. Launching
+from a **sandbox root** skips those prompts instead. The container mounts your
+current directory as its only writable surface, so scoping bypass by launch
+location makes the blast radius exactly the thing you already called disposable.
+The same signal also relaxes the [install policy](#installing-packages).
 
-    CLAUDEBOX_DEFAULT_SANDBOX_ROOT="$HOME/claude-sandbox"
-
-The gate is shared rather than duplicated in each launcher on purpose: two
-copies of a security-relevant check drift, and a launcher that quietly grants
-different permissions than its twin is the bad kind of bug.
-
-The default root is `~/claude-sandbox`, which is not created for you — until it
-exists, nothing matches and every launch prompts normally. Override the list
-per-call with a colon-separated `CLAUDE_SANDBOX_ROOTS`:
+The default root is `~/claude-sandbox`, and it isn't created for you — until it
+exists, nothing matches and every launch prompts. Override per-call:
 
     CLAUDE_SANDBOX_ROOTS="$HOME/scratch:$HOME/throwaway" claude-local
 
-A launch that matches prints two lines saying so before the container starts.
-Matching is on the resolved path — a symlink into a sandbox root counts as
-inside, and one pointing out of it counts as outside — and a root only matches
-that directory and things beneath it, so `/tmp/sandbox-evil` does not match a
-`/tmp/sandbox` root.
+A matching launch says so before the container starts. Matching is on the
+resolved path, so a symlink into a root counts as inside and one pointing out
+counts as outside; a root matches only itself and paths beneath it, so
+`/tmp/sandbox-evil` won't match a `/tmp/sandbox` root. Both launchers source the
+gate from `sandbox-gate.sh` rather than each keeping a copy — two versions of a
+security check drift, and a launcher that silently grants different permissions
+than its twin is the bad kind of bug.
 
-Why tie it to the directory: the container mounts your current directory as its
-only writable surface. Scoping bypass by launch location makes the blast radius
-exactly the thing you already decided was disposable.
-
-Two caveats worth stating plainly:
+Two caveats:
 
 - `CLAUDE_SANDBOX_ROOTS` is a convenience, not a security boundary. Anything
-  that can set your environment can grant itself bypass. Keep the default
-  narrow, and don't export it globally in your shell profile.
-- **Do not add this repo to the list.** Bypass here would let the agent rewrite
-  the launchers and widen its own allowlist.
+  that can set your environment can grant itself bypass. Keep it narrow, and
+  don't export it globally.
+- **Never list this repo.** Bypass here would let the agent rewrite the
+  launchers and widen its own allowlist.
 
-Auto mode (`--permission-mode auto`), which reviews actions with a classifier
-instead of skipping checks, is *not* available in this setup: the classifier
-requires a first-party Claude model, and this container routes inference to a
-local model. Bypass is all-or-nothing, which is why it is scoped by directory.
+Auto mode — which vets actions with a classifier rather than skipping checks —
+isn't available here: the classifier needs a first-party Claude model, and this
+container routes inference to a local one. Bypass is all-or-nothing, which is
+why it's scoped by directory.
 
 ## Installing packages
 
-Nothing installs from inside the container: egress is default-drop except the
-scanner, there is no DNS, and the agent user can't `sudo`. `npm install`,
-`pip install`, and `apt-get` all fail in there — by design, since fetching a
-package is executing code someone else wrote.
-
-Run this on the host instead, from the project directory:
+Nothing installs from inside the container: egress is default-drop, there's no
+DNS, and the agent can't `sudo`. Run this on the host instead, from the project
+directory:
 
 ```bash
-claudebox-install                  # install from package-lock.json / requirements.txt
-claudebox-install --update-lock    # generate a package-lock.json first, if there isn't one
-claudebox-install --allow-scripts  # permit lifecycle scripts / source builds
-claudebox-install --clean          # discard this project's dependency volumes
+claudebox-install            # install, using the policy for this directory
+claudebox-install --lenient  # or --strict, to override that policy
+claudebox-install --clean    # discard this project's dependency volumes
 ```
 
-**How it stays contained.** A throwaway container fetches the packages. It is
-given the manifest read-only and a Docker named volume to write into — no
-source, no `SCANNER_TOKEN`, no API key, no added capabilities — and it exits
-when the install finishes. The agent's own network posture is untouched.
+A throwaway container fetches the packages into a Docker named volume, which the
+launchers mount over `node_modules` / `.venv`. It gets no `SCANNER_TOKEN`, no
+API key, and no added capabilities, and exits when the install finishes. The
+agent's network posture is untouched, and because volumes live in Docker
+Desktop's VM, package code never lands on your Mac.
 
-Named volumes live inside Docker Desktop's VM, so package code never lands on
-your Mac. `claude-local` mounts the volume over `node_modules` / `.venv`, and
-the agent sees one normal-looking tree: your source from the host, dependencies
-from the volume.
+**Policy follows the sandbox gate** — the same signal that decides permission
+prompts:
 
-Three consequences worth knowing:
+| | lifecycle scripts | lockfile | project mount |
+|---|---|---|---|
+| under a sandbox root | run | written if missing | read-write |
+| elsewhere | disabled | required | manifest only, read-only |
 
-- **Lifecycle scripts are off by default** (`npm ci --ignore-scripts`, pip
-  `--only-binary :all:`). That's what stops `postinstall` from being arbitrary
-  code execution at install time. A few packages need them; `--allow-scripts`
-  re-enables them deliberately.
+Leniency lands where the blast radius is already disposable; real projects keep
+the guardrails. Disabling lifecycle scripts is the part that matters — it's what
+stops `postinstall` being arbitrary code execution at install time.
+
+Three things to know:
+
 - **Native modules work**, because the installer runs the same image as the
-  agent. Installing on your Mac instead would build Darwin binaries that are
-  visible inside the Linux container but won't load.
-- **Your Mac editor won't see the dependencies**, since they aren't on disk
-  there — no host-side autocomplete into `node_modules`. An empty
-  `node_modules/` directory does appear as a mount point; `--clean` removes it.
+  agent. Installing on your Mac would build Darwin binaries that are visible
+  inside this Linux container but won't load. Compiling them needs the image
+  built with `CLAUDEBOX_BUILD_TOOLS=1` (off by default — it roughly doubles the
+  image).
+- **Your Mac editor won't see the dependencies**, so no host-side autocomplete
+  into `node_modules`. An empty directory appears as a mount point; `--clean`
+  removes it.
+- **This isolates install time, not run time.** The dependency code executes
+  inside claudebox, which has your project mounted, so a malicious package can
+  still reach your source when the agent runs it.
 
-This isolates *install* time. At *run* time the dependency code executes inside
-claudebox, which has your project mounted — so a malicious package can still
-reach your source when the agent runs it. Nothing short of not running the code
-prevents that.
-
-**System tools and anything native** — add them to the `Dockerfile` and rebuild
-with `claude-local --rebuild`. The image build runs on the host with ordinary
-network access.
+**System tools** go in the `Dockerfile`, then `claude-local --rebuild`. That
+build runs on the host with ordinary network access.
 
 ## Files
 

@@ -3,7 +3,7 @@
 # Source this from ~/.zshrc rather than pasting the function in, so that
 # `git pull` actually updates it:
 #
-#     CLAUDEBOX_REPO="$HOME/claude-docker"
+#     CLAUDEBOX_REPO="$HOME/claudebox"
 #     [ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
 #
 # A copy pasted into ~/.zshrc is invisible to git: pulls update the image and
@@ -38,19 +38,19 @@ claudebox-install() { "$CLAUDEBOX_REPO/claudebox-install" "$@"; }
 
 claude-local() {
   local image="cc-agent"
-  local claude_docker_dir="$CLAUDEBOX_REPO"
+  local claudebox_dir="$CLAUDEBOX_REPO"
   local scanner_ip="${SCANNER_IP:-100.123.181.11}"
 
   # Load token (and any other vars) straight from .env on disk.
   # Sourcing reads the file directly; it does NOT enter Docker build context.
-  if [ -f "$claude_docker_dir/.env" ]; then
+  if [ -f "$claudebox_dir/.env" ]; then
     set -a
-    source "$claude_docker_dir/.env"
+    source "$claudebox_dir/.env"
     set +a
   fi
 
   if [ -z "${SCANNER_TOKEN:-}" ]; then
-    echo "claude-local: SCANNER_TOKEN not set (checked $claude_docker_dir/.env)." >&2
+    echo "claude-local: SCANNER_TOKEN not set (checked $claudebox_dir/.env)." >&2
     return 1
   fi
 
@@ -73,18 +73,18 @@ claude-local() {
   # Forced rebuild:  claude-local --rebuild
   if [ "${1:-}" = "--rebuild" ]; then
     shift
-    echo "claude-local: rebuilding image from $claude_docker_dir ..."
-    docker build --no-cache -t "$image" "$claude_docker_dir" || return 1
+    echo "claude-local: rebuilding image from $claudebox_dir ..."
+    docker build --no-cache --build-arg WITH_BUILD_TOOLS="${CLAUDEBOX_BUILD_TOOLS:-0}" -t "$image" "$claudebox_dir" || return 1
   fi
 
   # Auto-build if the image doesn't exist yet.
   if ! docker image inspect "$image" >/dev/null 2>&1; then
-    if [ ! -f "$claude_docker_dir/Dockerfile" ]; then
-      echo "claude-local: no Dockerfile at $claude_docker_dir." >&2
+    if [ ! -f "$claudebox_dir/Dockerfile" ]; then
+      echo "claude-local: no Dockerfile at $claudebox_dir." >&2
       return 1
     fi
-    echo "claude-local: image '$image' not found; building from $claude_docker_dir ..."
-    docker build -t "$image" "$claude_docker_dir" || {
+    echo "claude-local: image '$image' not found; building from $claudebox_dir ..."
+    docker build --build-arg WITH_BUILD_TOOLS="${CLAUDEBOX_BUILD_TOOLS:-0}" -t "$image" "$claudebox_dir" || {
       echo "claude-local: build failed." >&2
       return 1
     }

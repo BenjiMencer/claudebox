@@ -71,7 +71,7 @@ fi
 
 # Build from the repo, not the current directory: the mounted work directory is
 # whatever you launched from, which generally has no Dockerfile in it.
-docker build -t "$IMAGE" "$REPO_DIR"
+docker build --build-arg WITH_BUILD_TOOLS="${CLAUDEBOX_BUILD_TOOLS:-0}" -t "$IMAGE" "$REPO_DIR"
 
 # --rm only cleans up cc-agent on a normal exit. A crashed terminal, sleeping
 # Mac, or Docker Desktop restart can leave a stale container with this name
