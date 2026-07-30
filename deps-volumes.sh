@@ -4,11 +4,17 @@
 # Dependencies live in Docker named volumes rather than in the mounted project
 # directory. Named volumes live inside Docker Desktop's VM, so installed package
 # code never lands on the host filesystem, and the installer that fetches it can
-# be given the volume without being given your source.
+# be handed the volume without being handed your source.
 #
 # Sourcing this defines claudebox_deps_volumes, which sets:
-#   CLAUDEBOX_VOL_NODE  volume name for node_modules, or "" if not a node project
-#   CLAUDEBOX_VOL_PY    volume name for .venv, or "" if not a python project
+#   CLAUDEBOX_VOL_NODE  volume name for node_modules
+#   CLAUDEBOX_VOL_PY    volume name for .venv
+#   CLAUDEBOX_HAS_NODE  1 if this directory has a node manifest
+#   CLAUDEBOX_HAS_PY    1 if it has a python manifest
+#
+# The names are always set; the HAS_ flags say whether a manifest is present
+# right now. Callers need both, because a session can gain a manifest partway
+# through and the volumes have to already be mounted for that to be usable.
 #
 # POSIX only - no arrays, no unquoted word splitting - because bash and zsh
 # disagree on both and all three callers must agree on the names.
@@ -30,15 +36,27 @@ claudebox_project_id() {
 }
 
 claudebox_deps_volumes() {
-    CLAUDEBOX_VOL_NODE=""
-    CLAUDEBOX_VOL_PY=""
     claudebox_id=$(claudebox_project_id)
+    CLAUDEBOX_VOL_NODE="claudebox-${claudebox_id}-node_modules"
+    CLAUDEBOX_VOL_PY="claudebox-${claudebox_id}-venv"
 
-    [ -f "$PWD/package.json" ] && CLAUDEBOX_VOL_NODE="claudebox-${claudebox_id}-node_modules"
+    [ -f "$PWD/package.json" ] && CLAUDEBOX_HAS_NODE=1 || CLAUDEBOX_HAS_NODE=0
     if [ -f "$PWD/requirements.txt" ] || [ -f "$PWD/pyproject.toml" ]; then
-        CLAUDEBOX_VOL_PY="claudebox-${claudebox_id}-venv"
+        CLAUDEBOX_HAS_PY=1
+    else
+        CLAUDEBOX_HAS_PY=0
     fi
     return 0
 }
 
 claudebox_volume_exists() { docker volume inspect "$1" > /dev/null 2>&1; }
+
+# Create a volume if it doesn't exist, and hand it to the agent user: a fresh
+# named volume is root-owned, and the agent runs unprivileged. Costs one short
+# container run, once per project, and nothing on later launches.
+claudebox_ensure_volume() {
+    claudebox_volume_exists "$1" && return 0
+    docker volume create "$1" > /dev/null || return 1
+    docker run --rm --entrypoint sh -v "$1:/v" "$2" \
+        -c 'chown "$(id -u ccagent):$(id -g ccagent)" /v' > /dev/null 2>&1
+}

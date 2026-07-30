@@ -112,19 +112,27 @@ claude-local() {
     fi
   fi
 
-  # Dependency volumes, if claudebox-install has populated any for this
-  # project. Only mount ones that already exist: naming a missing volume would
-  # create an empty root-owned directory over node_modules, which reads as
-  # "dependencies are installed" while being unwritable to the agent.
+  # Dependency volumes. Mounted up front whenever this session might install
+  # something - a sandbox root, where the agent can trigger installs itself, or
+  # a directory that already has a manifest.
+  #
+  # Mounting them before anything is installed is the point. A volume attaches
+  # when the container starts, so one created later is invisible to the running
+  # agent: it would install successfully and then not be able to import what it
+  # installed. Attaching an empty volume now costs an empty directory and makes
+  # mid-session installs work.
   local -a deps_args
   deps_args=()
   if typeset -f claudebox_deps_volumes > /dev/null; then
     claudebox_deps_volumes
-    if [ -n "$CLAUDEBOX_VOL_NODE" ] && claudebox_volume_exists "$CLAUDEBOX_VOL_NODE"; then
-      deps_args+=(-v "${CLAUDEBOX_VOL_NODE}:${CLAUDEBOX_DEPS_MOUNT_NODE}")
-    fi
-    if [ -n "$CLAUDEBOX_VOL_PY" ] && claudebox_volume_exists "$CLAUDEBOX_VOL_PY"; then
-      deps_args+=(-v "${CLAUDEBOX_VOL_PY}:${CLAUDEBOX_DEPS_MOUNT_PY}")
+    if [ "$CLAUDEBOX_BYPASS" = 1 ] || [ "$CLAUDEBOX_HAS_NODE" = 1 ] \
+       || [ "$CLAUDEBOX_HAS_PY" = 1 ]; then
+      if claudebox_ensure_volume "$CLAUDEBOX_VOL_NODE" "$image"; then
+        deps_args+=(-v "${CLAUDEBOX_VOL_NODE}:${CLAUDEBOX_DEPS_MOUNT_NODE}")
+      fi
+      if claudebox_ensure_volume "$CLAUDEBOX_VOL_PY" "$image"; then
+        deps_args+=(-v "${CLAUDEBOX_VOL_PY}:${CLAUDEBOX_DEPS_MOUNT_PY}")
+      fi
     fi
   fi
 

@@ -50,7 +50,7 @@ docker info > /dev/null 2>&1 || { echo "claudebox-install: Docker isn't running.
 
 claudebox_deps_volumes
 
-if [ -z "$CLAUDEBOX_VOL_NODE" ] && [ -z "$CLAUDEBOX_VOL_PY" ]; then
+if [ "$CLAUDEBOX_HAS_NODE" = 0 ] && [ "$CLAUDEBOX_HAS_PY" = 0 ]; then
   echo "claudebox-install: nothing to install here." >&2
   echo "  Looked for package.json, requirements.txt, pyproject.toml in $PWD" >&2
   exit 1
@@ -99,52 +99,55 @@ CHOWN="chown -R ${CCAGENT_UID}:${CCAGENT_GID}"
 
 sidecar() { docker run --rm --entrypoint sh "$@"; }
 
-# Lenient installs go into the bind-mounted directory; strict ones into a
-# volume. A volume is only mounted when the container starts, so a mid-session
-# install into a fresh one is invisible to the running agent - which would
-# defeat the point of letting it trigger installs at all. Under a sandbox root
-# the agent can already write anywhere in this directory, so the volume was not
-# isolating anything there in the first place.
-drop_shadowing_volume() {
-  claudebox_volume_exists "$1" || return 0
-  docker volume rm "$1" > /dev/null
-  echo "claudebox-install: removed volume $1 (it would shadow the directory)"
+# Everything installs into a named volume, so package code stays off the host.
+# Whether the running agent can see it depends on the volume having been mounted
+# when its container started - report that accurately rather than always telling
+# people to restart.
+warn_if_unmounted() {
+  docker ps --filter "volume=$1" --format '{{.Names}}' 2> /dev/null | grep -q . \
+    || NEEDS_RESTART=1
 }
 
 # ------------------------------------------------------------------ node ---
-if [ -n "$CLAUDEBOX_VOL_NODE" ]; then
+if [ "$CLAUDEBOX_HAS_NODE" = 1 ]; then
+  claudebox_ensure_volume "$CLAUDEBOX_VOL_NODE" "$IMAGE"
+
   if [ "$POLICY" = lenient ]; then
-    drop_shadowing_volume "$CLAUDEBOX_VOL_NODE"
-    sidecar -v "$PWD":/work -w /work "$IMAGE" -c "npm install"
-    echo "claudebox-install: node deps ready in ./node_modules"
+    # Project mounted read-write so npm can write the lockfile it resolves.
+    sidecar \
+      -v "$PWD":/work \
+      -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
+      -w /work "$IMAGE" -c "npm install && $CHOWN /work/node_modules"
   else
     if [ ! -f "$PWD/package-lock.json" ]; then
       echo "claudebox-install: no package-lock.json, and the strict policy needs one." >&2
       echo "  Run with --lenient to resolve and write it." >&2
       exit 1
     fi
-    docker volume create "$CLAUDEBOX_VOL_NODE" > /dev/null
     sidecar \
       -v "$PWD/package.json":/work/package.json:ro \
       -v "$PWD/package-lock.json":/work/package-lock.json:ro \
       -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
       -w /work "$IMAGE" -c "npm ci --ignore-scripts && $CHOWN /work/node_modules"
-    echo "claudebox-install: node deps ready in $CLAUDEBOX_VOL_NODE"
-    NEEDS_RESTART=1
   fi
+
+  echo "claudebox-install: node deps ready in $CLAUDEBOX_VOL_NODE"
+  warn_if_unmounted "$CLAUDEBOX_VOL_NODE"
 fi
 
 # ---------------------------------------------------------------- python ---
-if [ -n "$CLAUDEBOX_VOL_PY" ]; then
+if [ "$CLAUDEBOX_HAS_PY" = 1 ]; then
+  claudebox_ensure_volume "$CLAUDEBOX_VOL_PY" "$IMAGE"
   VENV="/work/.venv/bin"
   [ -f "$PWD/requirements.txt" ] && PIP_SRC="-r requirements.txt" || PIP_SRC="."
 
   if [ "$POLICY" = lenient ]; then
-    drop_shadowing_volume "$CLAUDEBOX_VOL_PY"
-    sidecar -v "$PWD":/work -w /work "$IMAGE" -c \
+    sidecar \
+      -v "$PWD":/work \
+      -v "$CLAUDEBOX_VOL_PY":/work/.venv \
+      -w /work "$IMAGE" -c \
       "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
-         && $VENV/pip install $PIP_SRC"
-    echo "claudebox-install: python deps ready in ./.venv"
+         && $VENV/pip install $PIP_SRC && $CHOWN /work/.venv"
   else
     # Building a pyproject is a source build by definition, so there is no
     # strict version of it. --only-binary blocks source distributions, which
@@ -154,7 +157,6 @@ if [ -n "$CLAUDEBOX_VOL_PY" ]; then
       echo "  strict policy disallows. Use --lenient, or add a requirements.txt." >&2
       exit 1
     fi
-    docker volume create "$CLAUDEBOX_VOL_PY" > /dev/null
     sidecar \
       -v "$PWD/requirements.txt":/work/requirements.txt:ro \
       -v "$CLAUDEBOX_VOL_PY":/work/.venv \
@@ -162,14 +164,15 @@ if [ -n "$CLAUDEBOX_VOL_PY" ]; then
       "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
          && $VENV/pip install --only-binary :all: -r requirements.txt \
          && $CHOWN /work/.venv"
-    echo "claudebox-install: python deps ready in $CLAUDEBOX_VOL_PY"
-    NEEDS_RESTART=1
   fi
+
+  echo "claudebox-install: python deps ready in $CLAUDEBOX_VOL_PY"
+  warn_if_unmounted "$CLAUDEBOX_VOL_PY"
 fi
 
 if [ -n "${NEEDS_RESTART:-}" ]; then
-  echo "claudebox-install: done. Restart claude-local to pick these up - a volume"
-  echo "  is only mounted when the container starts."
+  echo "claudebox-install: done. Restart claude-local to pick these up - no running"
+  echo "  container has this volume mounted, and a volume attaches only at start."
 else
   echo "claudebox-install: done. Available immediately; no restart needed."
 fi

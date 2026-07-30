@@ -72,5 +72,7 @@ so ask the user to run `claudebox-install`.
 
 Node resolves `./node_modules` itself, so `node` and `npx` just work.
 
-Both are available immediately — no restart. Say what you installed and why:
-you did it unsupervised, and the log is the user's only record.
+Packages land in a volume the launcher already mounted, so they're usable
+immediately. If the log says a restart is needed, relay that — you can't restart
+yourself. Say what you installed and why: you did it unsupervised, and the log
+is the user's only record.
