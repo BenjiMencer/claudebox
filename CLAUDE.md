@@ -71,9 +71,10 @@ with `ModuleNotFoundError`. Use:
     ~/venv/bin/pip list         # check what's installed
 
 Node packages go to `~/node_modules`, which Node finds by walking up from the
-working directory — `node` and `npx` just work, and `ls node_modules` will show
-nothing. That's expected; dependencies deliberately live outside the project so
-they never touch the user's filesystem.
+working directory — `node` and `npx` just work, though there's no `node_modules`
+in the project itself. That's expected: dependencies live outside the mounted
+directory so they never touch the user's filesystem. Don't read its absence as
+a failed install; check the log.
 
 Both are usable immediately, no restart. Say what you installed and why: you did
 it unsupervised, and the log is the user's only record.

@@ -162,10 +162,10 @@ claudebox-install --clean    # discard this project's dependency volumes
 ```
 
 A throwaway container fetches the packages into a Docker named volume, which the
-launchers mount over `node_modules` / `.venv`. It gets no `SCANNER_TOKEN`, no API
-key, and no added capabilities, and exits when the install finishes. The agent's
-own network posture is untouched, and because volumes live in Docker Desktop's
-VM, package code never lands on your Mac.
+launchers attach at `~/node_modules` and `~/venv` inside the container. It gets
+no `SCANNER_TOKEN`, no API key, and no added capabilities, and exits when the
+install finishes. The agent's own network posture is untouched, and because
+volumes live in Docker Desktop's VM, package code never lands on your Mac.
 
 **Policy follows the sandbox gate** — the same signal that decides permission
 prompts:
