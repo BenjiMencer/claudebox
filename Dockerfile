@@ -1,8 +1,10 @@
 FROM node:20-slim
 
 # Tools needed for the egress policy and the startup self-test.
+# python3-venv carries ensurepip, without which `python3 -m venv` produces an
+# environment with no pip in it.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      iptables curl ca-certificates iproute2 gosu python3 \
+      iptables curl ca-certificates iproute2 gosu python3 python3-venv \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code.

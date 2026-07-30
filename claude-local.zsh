@@ -28,6 +28,14 @@ else
   echo "claude-local: missing $CLAUDEBOX_REPO/sandbox-gate.sh - bypass disabled." >&2
 fi
 
+if [ -f "$CLAUDEBOX_REPO/deps-volumes.sh" ]; then
+  source "$CLAUDEBOX_REPO/deps-volumes.sh"
+fi
+
+# Install a project's dependencies into a Docker volume, via a throwaway
+# container that gets the manifest and nothing else. See claudebox-install.
+claudebox-install() { "$CLAUDEBOX_REPO/claudebox-install" "$@"; }
+
 claude-local() {
   local image="cc-agent"
   local claude_docker_dir="$CLAUDEBOX_REPO"
@@ -104,6 +112,22 @@ claude-local() {
     fi
   fi
 
+  # Dependency volumes, if claudebox-install has populated any for this
+  # project. Only mount ones that already exist: naming a missing volume would
+  # create an empty root-owned directory over node_modules, which reads as
+  # "dependencies are installed" while being unwritable to the agent.
+  local -a deps_args
+  deps_args=()
+  if typeset -f claudebox_deps_volumes > /dev/null; then
+    claudebox_deps_volumes
+    if [ -n "$CLAUDEBOX_VOL_NODE" ] && claudebox_volume_exists "$CLAUDEBOX_VOL_NODE"; then
+      deps_args+=(-v "${CLAUDEBOX_VOL_NODE}:${CLAUDEBOX_DEPS_MOUNT_NODE}")
+    fi
+    if [ -n "$CLAUDEBOX_VOL_PY" ] && claudebox_volume_exists "$CLAUDEBOX_VOL_PY"; then
+      deps_args+=(-v "${CLAUDEBOX_VOL_PY}:${CLAUDEBOX_DEPS_MOUNT_PY}")
+    fi
+  fi
+
   # --rm only cleans up the container on a normal exit. A crashed terminal,
   # sleeping Mac, or Docker Desktop restart can leave a stale container with
   # this name behind, which makes the `docker run --name` below fail with
@@ -132,6 +156,7 @@ claude-local() {
     -e ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://${scanner_ip}:8080}" \
     -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy}" \
     -v "$PWD":/home/ccagent/work \
+    "${deps_args[@]}" \
     -w /home/ccagent/work \
     "$image" "${perm_args[@]}" "$@"
 }

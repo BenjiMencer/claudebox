@@ -47,17 +47,28 @@ looks like a broken proxy rather than a deliberate wall. Don't retry, don't try
 another registry or mirror, and don't hunt for a workaround — nothing available
 in here reaches the network. Say what's needed and let the user run it.
 
-**Project dependencies** — the working directory is bind-mounted from the host,
-so an install the user runs there shows up immediately, with no rebuild:
+**Project dependencies** — edit the manifest yourself (`package.json`,
+`requirements.txt`, `pyproject.toml`), then ask the user to run:
 
-    # on the host, in this same directory
-    npm install <pkg>
+    claudebox-install
 
-One caveat to raise when it applies: packages with compiled native components
-(node-gyp addons, `sharp`, most scientific Python wheels) are built for the
-host's OS and architecture. Installed from macOS, the files will be visible in
-here but the binaries won't load, because this container is Linux. Pure
-JavaScript and pure Python are fine.
+That fetches the packages in a throwaway container and puts them in a Docker
+volume mounted over `node_modules` / `.venv`. The result appears here
+immediately — no restart, no rebuild. Say what you added and why; the user
+running it is the review step.
+
+Useful variants to mention when they apply:
+
+- `claudebox-install --update-lock` — needed once if there's no
+  `package-lock.json`, since the strict install requires one.
+- `claudebox-install --allow-scripts` — by default package lifecycle scripts
+  and source builds are disabled, which a few packages genuinely need. Only
+  suggest it for a package that fails without it, and say why.
+- `claudebox-install --clean` — discard this project's dependency volumes.
+
+`node_modules` and `.venv` here are volumes, not host directories. They're
+writable, but treat them as build output: changes don't persist to the user's
+machine, and a `--clean` wipes them.
 
 **System tools, and anything native** — these belong in the image, which builds
 on the host with ordinary network access. Point the user at the `Dockerfile`:
@@ -67,5 +78,5 @@ on the host with ordinary network access. Point the user at the `Dockerfile`:
 
 then have them rebuild with `claude-local --rebuild`.
 
-Anything you install outside the mounted working directory is discarded when the
-session ends, since the container runs with `--rm`.
+Anything you install outside the mounted working directory or those volumes is
+discarded when the session ends, since the container runs with `--rm`.

@@ -156,18 +156,49 @@ local model. Bypass is all-or-nothing, which is why it is scoped by directory.
 
 Nothing installs from inside the container: egress is default-drop except the
 scanner, there is no DNS, and the agent user can't `sudo`. `npm install`,
-`pip install`, and `apt-get` all fail in there.
+`pip install`, and `apt-get` all fail in there — by design, since fetching a
+package is executing code someone else wrote.
 
-- **Project dependencies** — run the install on the host, in the directory you
-  launched from. It's bind-mounted, so the result is visible inside
-  immediately, with no rebuild. Native/compiled packages are the exception:
-  built on macOS, they won't load in this Linux container.
-- **System tools and native packages** — add them to the `Dockerfile` and
-  rebuild with `claude-local --rebuild`. The build runs on the host with normal
-  network access.
+Run this on the host instead, from the project directory:
 
-`CLAUDE.md` tells the agent to hand these to you rather than flailing at a
-network it can't reach.
+```bash
+claudebox-install                  # install from package-lock.json / requirements.txt
+claudebox-install --update-lock    # generate a package-lock.json first, if there isn't one
+claudebox-install --allow-scripts  # permit lifecycle scripts / source builds
+claudebox-install --clean          # discard this project's dependency volumes
+```
+
+**How it stays contained.** A throwaway container fetches the packages. It is
+given the manifest read-only and a Docker named volume to write into — no
+source, no `SCANNER_TOKEN`, no API key, no added capabilities — and it exits
+when the install finishes. The agent's own network posture is untouched.
+
+Named volumes live inside Docker Desktop's VM, so package code never lands on
+your Mac. `claude-local` mounts the volume over `node_modules` / `.venv`, and
+the agent sees one normal-looking tree: your source from the host, dependencies
+from the volume.
+
+Three consequences worth knowing:
+
+- **Lifecycle scripts are off by default** (`npm ci --ignore-scripts`, pip
+  `--only-binary :all:`). That's what stops `postinstall` from being arbitrary
+  code execution at install time. A few packages need them; `--allow-scripts`
+  re-enables them deliberately.
+- **Native modules work**, because the installer runs the same image as the
+  agent. Installing on your Mac instead would build Darwin binaries that are
+  visible inside the Linux container but won't load.
+- **Your Mac editor won't see the dependencies**, since they aren't on disk
+  there — no host-side autocomplete into `node_modules`. An empty
+  `node_modules/` directory does appear as a mount point; `--clean` removes it.
+
+This isolates *install* time. At *run* time the dependency code executes inside
+claudebox, which has your project mounted — so a malicious package can still
+reach your source when the agent runs it. Nothing short of not running the code
+prevents that.
+
+**System tools and anything native** — add them to the `Dockerfile` and rebuild
+with `claude-local --rebuild`. The image build runs on the host with ordinary
+network access.
 
 ## Files
 
@@ -184,6 +215,10 @@ network it can't reach.
   above, plus optional shell niceties.
 - `sandbox-gate.sh` — the shared directory check that decides whether a launch
   skips permission prompts. Sourced by both launchers so they can't disagree.
+- `claudebox-install` — installs project dependencies into a Docker volume via
+  a throwaway container, so the agent never needs network access.
+- `deps-volumes.sh` — shared naming/detection for those volumes, so the
+  installer and both launchers agree on where dependencies live.
 - `CLAUDE.md` — project instructions telling the agent to use only the scanner
   for web access and to treat scanned page content as untrusted data.
 - `skills/web-scanner/` — the scanner skill (reads its token from

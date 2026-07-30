@@ -48,6 +48,20 @@ ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://${SCANNER_IP}:8080}"
 source "$REPO_DIR/sandbox-gate.sh"
 claudebox_check_sandbox
 
+# Dependency volumes, if claudebox-install has populated any for this project.
+# Only mount ones that already exist: naming a missing volume would create an
+# empty root-owned directory over node_modules, which reads as "dependencies
+# are installed" while being unwritable to the agent.
+source "$REPO_DIR/deps-volumes.sh"
+claudebox_deps_volumes
+DEPS_ARGS=()
+if [ -n "$CLAUDEBOX_VOL_NODE" ] && claudebox_volume_exists "$CLAUDEBOX_VOL_NODE"; then
+  DEPS_ARGS+=(-v "${CLAUDEBOX_VOL_NODE}:${CLAUDEBOX_DEPS_MOUNT_NODE}")
+fi
+if [ -n "$CLAUDEBOX_VOL_PY" ] && claudebox_volume_exists "$CLAUDEBOX_VOL_PY"; then
+  DEPS_ARGS+=(-v "${CLAUDEBOX_VOL_PY}:${CLAUDEBOX_DEPS_MOUNT_PY}")
+fi
+
 PERM_ARGS=()
 if [ "$CLAUDEBOX_BYPASS" = 1 ]; then
   PERM_ARGS=(--permission-mode bypassPermissions)
@@ -88,5 +102,6 @@ exec docker run -it --rm \
   -e ANTHROPIC_BASE_URL="$ANTHROPIC_BASE_URL" \
   -e ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-dummy}" \
   -v "$PWD":/home/ccagent/work \
+  ${DEPS_ARGS[@]+"${DEPS_ARGS[@]}"} \
   -w /home/ccagent/work \
   "$IMAGE" ${PERM_ARGS[@]+"${PERM_ARGS[@]}"} "$@"
