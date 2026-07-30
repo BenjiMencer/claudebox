@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Watch a project directory for install requests from the agent.
+#
+#   claudebox-watch <project-dir>
+#
+# The launchers start this in the background for sandbox-root sessions and stop
+# it when the container exits. You don't normally run it by hand.
+#
+# The agent has no network and no Docker socket, so it cannot install anything
+# itself. What it can do is create a request file in the directory it shares
+# with you; this loop notices, runs claudebox-install there, and writes the
+# output somewhere the agent can read back.
+#
+# The split that makes this safe: the agent chooses WHEN, never WHAT. The
+# command run here is fixed. Handing the agent a way to name the command, or the
+# Docker socket to run it itself, would be a container escape to host root.
+#
+# It still chooses the manifest, so it chooses which packages get installed -
+# a confused-deputy hole by construction. That is why the launchers only start
+# this under a sandbox root, where the blast radius is already disposable.
+set -euo pipefail
+
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+PROJECT_DIR="${1:?usage: claudebox-watch <project-dir>}"
+
+REQUEST="$PROJECT_DIR/.claudebox-install-request"
+LOG="$PROJECT_DIR/.claudebox-install.log"
+INTERVAL="${CLAUDEBOX_WATCH_INTERVAL:-2}"
+
+while true; do
+  if [ -e "$REQUEST" ]; then
+    # Clear the request before acting on it. Clearing afterwards would re-run
+    # forever if the install crashed the loop.
+    rm -f "$REQUEST"
+
+    # Capture the status explicitly rather than leaning on set -e. A compound
+    # command on the left of || runs with errexit suppressed, so the earlier
+    # shape of this logged success after a failed install - which the agent
+    # would have read as "dependencies are ready".
+    (
+      cd "$PROJECT_DIR" || exit 1
+      echo "=== claudebox-install, requested by the agent ==="
+      status=0
+      "$REPO_DIR/claudebox-install" || status=$?
+      if [ "$status" -eq 0 ]; then
+        echo "=== finished ==="
+      else
+        echo "=== failed, exit $status ==="
+      fi
+    ) > "$LOG" 2>&1
+  fi
+  sleep "$INTERVAL"
+done

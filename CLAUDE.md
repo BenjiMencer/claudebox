@@ -38,10 +38,22 @@ deliberate wall — don't retry, don't switch registries, don't hunt for a
 workaround. Say what's needed and let the user run it.
 
 **Project dependencies.** Edit the manifest (`package.json`,
-`requirements.txt`, `pyproject.toml`), then ask the user to run
-`claudebox-install`. It fetches packages in a throwaway container and puts them
-in a volume mounted over `node_modules` / `.venv` — visible here immediately, no
-restart. Say what you added and why; them running it is the review step.
+`requirements.txt`, `pyproject.toml`), then get it installed. Packages arrive in
+a volume mounted over `node_modules` / `.venv`, visible here immediately.
+
+If the session started with `watching for install requests`, you can trigger it
+yourself:
+
+    touch .claudebox-install-request
+    # wait a couple of seconds, then:
+    cat .claudebox-install.log
+
+The log ends in `=== finished ===` or `=== failed, exit N ===`. Read it before
+carrying on — don't assume it worked. Say what you installed and why; you're
+doing this unsupervised, so the log is the user's only record.
+
+If that line didn't appear, the watcher isn't running and you can't trigger
+anything. Ask the user to run `claudebox-install` instead.
 
 If it refuses because the strict policy needs a lockfile or blocks a source
 build, relay that: `claudebox-install --lenient` overrides, and is the normal

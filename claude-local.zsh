@@ -146,6 +146,18 @@ claude-local() {
     docker rm "$container_name" >/dev/null
   fi
 
+  # Under a sandbox root, watch for install requests from the agent. It has no
+  # network and no Docker socket, so it signals by writing a file; the watcher
+  # runs a fixed command in response. Only here, where the blast radius is
+  # already disposable. Set CLAUDEBOX_NO_WATCH=1 to opt out.
+  local watch_pid=""
+  if [ "${CLAUDEBOX_BYPASS:-0}" = 1 ] && [ -z "${CLAUDEBOX_NO_WATCH:-}" ] \
+     && [ -x "$CLAUDEBOX_REPO/claudebox-watch" ]; then
+    "$CLAUDEBOX_REPO/claudebox-watch" "$PWD" > /dev/null 2>&1 &
+    watch_pid=$!
+    echo "claude-local: watching for install requests (touch .claudebox-install-request)"
+  fi
+
   # Run: contained network + dropped privileges, mounting the current dir.
   docker run -it --rm \
     --name "$container_name" \
@@ -159,4 +171,17 @@ claude-local() {
     "${deps_args[@]}" \
     -w /home/ccagent/work \
     "$image" "${perm_args[@]}" "$@"
+  local run_status=$?
+
+  if [ -n "$watch_pid" ]; then
+    kill "$watch_pid" 2> /dev/null
+    wait "$watch_pid" 2> /dev/null
+    rm -f "$PWD/.claudebox-install-request"
+    # Surface installs that happened mid-session: they ran without you watching,
+    # and the terminal was busy with the agent's own output at the time.
+    [ -f "$PWD/.claudebox-install.log" ] \
+      && echo "claude-local: the agent ran an install — see .claudebox-install.log"
+  fi
+
+  return $run_status
 }

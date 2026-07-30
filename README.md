@@ -190,6 +190,22 @@ Three things to know:
 **System tools** go in the `Dockerfile`, then `claude-local --rebuild`. That
 build runs on the host with ordinary network access.
 
+### Letting the agent install for itself
+
+Under a sandbox root, the launchers also start a watcher. The agent creates
+`.claudebox-install-request`; the watcher runs `claudebox-install` in that
+directory and writes the output to `.claudebox-install.log`, which the agent
+reads back. No network for the agent, no Docker socket, and the command it
+triggers is fixed — it chooses *when*, never *what*.
+
+It does choose the manifest, so it chooses which packages get installed. That's
+a confused-deputy hole by construction, which is why this only runs under a
+sandbox root. `CLAUDEBOX_NO_WATCH=1` disables it.
+
+Installs that happen mid-session scroll past while the agent is talking, so the
+launcher points at the log on exit. That log is your record of what got pulled
+in without you watching.
+
 ## Files
 
 - `Dockerfile` — builds the agent image (Claude Code + scanner skill + guidance).
@@ -209,6 +225,8 @@ build runs on the host with ordinary network access.
   a throwaway container, so the agent never needs network access.
 - `deps-volumes.sh` — shared naming/detection for those volumes, so the
   installer and both launchers agree on where dependencies live.
+- `claudebox-watch` — under a sandbox root, lets the agent trigger an install
+  by writing a request file. Started and stopped by the launchers.
 - `CLAUDE.md` — project instructions telling the agent to use only the scanner
   for web access and to treat scanned page content as untrusted data.
 - `skills/web-scanner/` — the scanner skill (reads its token from

@@ -90,7 +90,30 @@ elif [ -n "$existing_running" ]; then
   docker rm "$CONTAINER_NAME" >/dev/null
 fi
 
-exec docker run -it --rm \
+# Under a sandbox root, watch for install requests from the agent. It has no
+# network and no Docker socket, so it signals by writing a file; the watcher
+# runs a fixed command in response. Only here, where the blast radius is already
+# disposable. Set CLAUDEBOX_NO_WATCH=1 to opt out.
+WATCH_PID=""
+if [ "$CLAUDEBOX_BYPASS" = 1 ] && [ -z "${CLAUDEBOX_NO_WATCH:-}" ] \
+   && [ -x "$REPO_DIR/claudebox-watch" ]; then
+  "$REPO_DIR/claudebox-watch" "$PWD" > /dev/null 2>&1 &
+  WATCH_PID=$!
+  echo "claudebox: watching for install requests (touch .claudebox-install-request)"
+fi
+
+cleanup() {
+  [ -n "$WATCH_PID" ] || return 0
+  kill "$WATCH_PID" 2> /dev/null || true
+  rm -f "$PWD/.claudebox-install-request"
+  [ -f "$PWD/.claudebox-install.log" ] \
+    && echo "claudebox: the agent ran an install — see .claudebox-install.log"
+  return 0
+}
+trap cleanup EXIT
+
+# Not exec'd: the trap above has to survive the container exiting.
+docker run -it --rm \
   --name "$CONTAINER_NAME" \
   --cap-drop=ALL \
   --cap-add=NET_ADMIN \
