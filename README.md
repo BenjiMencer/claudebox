@@ -179,14 +179,13 @@ Leniency lands where the blast radius is already disposable; real projects keep
 the guardrails. Disabling lifecycle scripts is the part that matters — it's what
 stops `postinstall` being arbitrary code execution at install time.
 
-**Timing.** A volume attaches when the container *starts*, so one created later
-is invisible to a running agent — it would install successfully and then fail to
-import what it installed. The launchers therefore attach the volumes up front
-whenever a session might install something: under a sandbox root, or in a
-directory that already has a manifest. That costs an empty directory and makes
-mid-session installs work. Install into a project that didn't qualify at launch
-and `claudebox-install` will say a restart is needed, having checked whether any
-running container actually has the volume.
+**No preloading, no restart.** A volume attaches when a container *starts*, so
+one created mid-session would be invisible to a running agent — it would install
+successfully and then fail to import what it installed. Rather than making every
+session guess in advance, `claudebox-install` streams the tree straight into the
+running container when it isn't already mounted. The stream goes through a pipe,
+so package code still never touches host disk, and the volume persists for the
+next launch.
 
 Three things to know:
 
@@ -195,9 +194,10 @@ Three things to know:
   inside this Linux container but won't load. Compiling them needs the image
   built with `CLAUDEBOX_BUILD_TOOLS=1` (off by default — it roughly doubles the
   image).
-- **Your Mac editor won't see the dependencies**, since they live in a volume —
-  no host-side autocomplete into `node_modules`. An empty directory appears as
-  the mount point; `--clean` removes it.
+- **Nothing appears in your project.** Dependencies live at `~/node_modules` and
+  `~/venv` inside the container, outside the mounted directory — Node resolves
+  its own by walking up, and Python needs `~/venv/bin/python`. So no empty mount
+  points on the Mac, but also no host-side autocomplete into `node_modules`.
 - **This isolates install time, not run time.** The dependency code executes
   inside claudebox, which has your project mounted, so a malicious package can
   still reach your source when the agent runs it.

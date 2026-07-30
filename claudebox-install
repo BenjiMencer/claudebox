@@ -63,12 +63,6 @@ if [ "$CLEAN" = 1 ]; then
       && docker volume rm "$vol" > /dev/null \
       && echo "claudebox-install: removed $vol"
   done
-  # Mounting a volume over a subpath of a bind mount leaves an empty directory
-  # behind on the host. Tidy it up, but only while it is still empty.
-  for stub in node_modules .venv; do
-    [ -d "$PWD/$stub" ] && rmdir "$PWD/$stub" 2> /dev/null \
-      && echo "claudebox-install: removed empty $stub/"
-  done
   exit 0
 fi
 
@@ -103,9 +97,29 @@ sidecar() { docker run --rm --entrypoint sh "$@"; }
 # Whether the running agent can see it depends on the volume having been mounted
 # when its container started - report that accurately rather than always telling
 # people to restart.
-warn_if_unmounted() {
-  docker ps --filter "volume=$1" --format '{{.Names}}' 2> /dev/null | grep -q . \
-    || NEEDS_RESTART=1
+# A volume attaches when a container starts, so a session that began before
+# this install has no way to see it. Rather than telling the agent to restart -
+# which it cannot do - stream the tree into the running container.
+#
+# The pipe means package code never touches host disk, and the destination is
+# outside the bind-mounted work directory on purpose: docker cp into a bind
+# mount writes through to the Mac, which is the thing being avoided.
+sync_into_running_container() {
+  sync_vol="$1"; sync_dest="$2"
+  sync_container="$(claudebox_container_name)"
+
+  [ "$(docker inspect -f '{{.State.Running}}' "$sync_container" 2> /dev/null)" = true ] || return 0
+  # Already attached? Then it is a live view of the volume and needs nothing.
+  docker inspect "$sync_container" \
+    --format '{{range .Mounts}}{{.Name}} {{end}}' 2> /dev/null \
+    | tr ' ' '\n' | grep -qx "$sync_vol" && return 0
+
+  echo "claudebox-install: copying into the running $sync_container ..."
+  docker exec -u root "$sync_container" mkdir -p "$sync_dest"
+  docker run --rm -v "$sync_vol":/src --entrypoint tar "$IMAGE" -C /src -cf - . \
+    | docker cp - "$sync_container:$sync_dest"
+  docker exec -u root "$sync_container" \
+    chown -R "${CCAGENT_UID}:${CCAGENT_GID}" "$sync_dest"
 }
 
 # ------------------------------------------------------------------ node ---
@@ -113,11 +127,20 @@ if [ "$CLAUDEBOX_HAS_NODE" = 1 ]; then
   claudebox_ensure_volume "$CLAUDEBOX_VOL_NODE" "$IMAGE"
 
   if [ "$POLICY" = lenient ]; then
-    # Project mounted read-write so npm can write the lockfile it resolves.
+    # Resolve in a scratch directory inside the container, not in /work.
+    # Mounting the volume at /work/node_modules would make Docker create that
+    # directory on the host, which is the one thing this is meant to avoid.
+    # The project is still mounted read-write so the resolved lockfile can be
+    # copied back out.
     sidecar \
       -v "$PWD":/work \
-      -v "$CLAUDEBOX_VOL_NODE":/work/node_modules \
-      -w /work "$IMAGE" -c "npm install && $CHOWN /work/node_modules"
+      -v "$CLAUDEBOX_VOL_NODE":/build/node_modules \
+      "$IMAGE" -c "mkdir -p /build \
+         && cp /work/package.json /build/ \
+         && { [ -f /work/package-lock.json ] && cp /work/package-lock.json /build/ || true; } \
+         && cd /build && npm install \
+         && cp /build/package-lock.json /work/package-lock.json \
+         && $CHOWN /build/node_modules"
   else
     if [ ! -f "$PWD/package-lock.json" ]; then
       echo "claudebox-install: no package-lock.json, and the strict policy needs one." >&2
@@ -132,22 +155,22 @@ if [ "$CLAUDEBOX_HAS_NODE" = 1 ]; then
   fi
 
   echo "claudebox-install: node deps ready in $CLAUDEBOX_VOL_NODE"
-  warn_if_unmounted "$CLAUDEBOX_VOL_NODE"
+  sync_into_running_container "$CLAUDEBOX_VOL_NODE" "$CLAUDEBOX_DEPS_MOUNT_NODE"
 fi
 
 # ---------------------------------------------------------------- python ---
 if [ "$CLAUDEBOX_HAS_PY" = 1 ]; then
   claudebox_ensure_volume "$CLAUDEBOX_VOL_PY" "$IMAGE"
-  VENV="/work/.venv/bin"
+  VENV="${CLAUDEBOX_DEPS_MOUNT_PY}/bin"
   [ -f "$PWD/requirements.txt" ] && PIP_SRC="-r requirements.txt" || PIP_SRC="."
 
   if [ "$POLICY" = lenient ]; then
     sidecar \
       -v "$PWD":/work \
-      -v "$CLAUDEBOX_VOL_PY":/work/.venv \
+      -v "$CLAUDEBOX_VOL_PY":"$CLAUDEBOX_DEPS_MOUNT_PY" \
       -w /work "$IMAGE" -c \
-      "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
-         && $VENV/pip install $PIP_SRC && $CHOWN /work/.venv"
+      "python3 -m venv $CLAUDEBOX_DEPS_MOUNT_PY && $VENV/pip install -q --upgrade pip \
+         && $VENV/pip install $PIP_SRC && $CHOWN $CLAUDEBOX_DEPS_MOUNT_PY"
   else
     # Building a pyproject is a source build by definition, so there is no
     # strict version of it. --only-binary blocks source distributions, which
@@ -159,20 +182,15 @@ if [ "$CLAUDEBOX_HAS_PY" = 1 ]; then
     fi
     sidecar \
       -v "$PWD/requirements.txt":/work/requirements.txt:ro \
-      -v "$CLAUDEBOX_VOL_PY":/work/.venv \
+      -v "$CLAUDEBOX_VOL_PY":"$CLAUDEBOX_DEPS_MOUNT_PY" \
       -w /work "$IMAGE" -c \
-      "python3 -m venv /work/.venv && $VENV/pip install -q --upgrade pip \
+      "python3 -m venv $CLAUDEBOX_DEPS_MOUNT_PY && $VENV/pip install -q --upgrade pip \
          && $VENV/pip install --only-binary :all: -r requirements.txt \
-         && $CHOWN /work/.venv"
+         && $CHOWN $CLAUDEBOX_DEPS_MOUNT_PY"
   fi
 
   echo "claudebox-install: python deps ready in $CLAUDEBOX_VOL_PY"
-  warn_if_unmounted "$CLAUDEBOX_VOL_PY"
+  sync_into_running_container "$CLAUDEBOX_VOL_PY" "$CLAUDEBOX_DEPS_MOUNT_PY"
 fi
 
-if [ -n "${NEEDS_RESTART:-}" ]; then
-  echo "claudebox-install: done. Restart claude-local to pick these up - no running"
-  echo "  container has this volume mounted, and a volume attaches only at start."
-else
-  echo "claudebox-install: done. Available immediately; no restart needed."
-fi
+echo "claudebox-install: done. Available now - no restart."

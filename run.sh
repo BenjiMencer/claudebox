@@ -59,25 +59,17 @@ fi
 # whatever you launched from, which generally has no Dockerfile in it.
 docker build --build-arg WITH_BUILD_TOOLS="${CLAUDEBOX_BUILD_TOOLS:-0}" -t "$IMAGE" "$REPO_DIR"
 
-# Dependency volumes. Mounted up front whenever this session might install
-# something - a sandbox root, where the agent can trigger installs itself, or a
-# directory that already has a manifest.
-#
-# Mounting them before anything is installed is the point. A volume attaches
-# when the container starts, so one created later is invisible to the running
-# agent: it would install successfully and then not be able to import what it
-# installed. Attaching an empty volume now costs an empty directory and makes
-# mid-session installs work.
+# Attach whatever dependency volumes this project already has. Nothing is
+# created here: an install started later copies itself into the running
+# container, so a session doesn't need to have guessed in advance.
 source "$REPO_DIR/deps-volumes.sh"
 claudebox_deps_volumes
 DEPS_ARGS=()
-if [ "$CLAUDEBOX_BYPASS" = 1 ] || [ "$CLAUDEBOX_HAS_NODE" = 1 ] || [ "$CLAUDEBOX_HAS_PY" = 1 ]; then
-  if claudebox_ensure_volume "$CLAUDEBOX_VOL_NODE" "$IMAGE"; then
-    DEPS_ARGS+=(-v "${CLAUDEBOX_VOL_NODE}:${CLAUDEBOX_DEPS_MOUNT_NODE}")
-  fi
-  if claudebox_ensure_volume "$CLAUDEBOX_VOL_PY" "$IMAGE"; then
-    DEPS_ARGS+=(-v "${CLAUDEBOX_VOL_PY}:${CLAUDEBOX_DEPS_MOUNT_PY}")
-  fi
+if claudebox_volume_exists "$CLAUDEBOX_VOL_NODE"; then
+  DEPS_ARGS+=(-v "${CLAUDEBOX_VOL_NODE}:${CLAUDEBOX_DEPS_MOUNT_NODE}")
+fi
+if claudebox_volume_exists "$CLAUDEBOX_VOL_PY"; then
+  DEPS_ARGS+=(-v "${CLAUDEBOX_VOL_PY}:${CLAUDEBOX_DEPS_MOUNT_PY}")
 fi
 
 # --rm only cleans up cc-agent on a normal exit. A crashed terminal, sleeping

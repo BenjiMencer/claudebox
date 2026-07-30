@@ -63,16 +63,17 @@ The log ends in `=== finished ===` or `=== failed, exit N ===`. Read it; don't
 assume it worked. If startup didn't print that line you can't trigger anything,
 so ask the user to run `claudebox-install`.
 
-**Then use the venv, not the system interpreter.** Python packages land in
-`.venv/`, so plain `python3 -c "import pypdf"` still fails with
-`ModuleNotFoundError`. Use:
+**Then use the venv, not the system interpreter.** Python packages install to
+`~/venv`, outside the project, so plain `python3 -c "import pypdf"` still fails
+with `ModuleNotFoundError`. Use:
 
-    .venv/bin/python script.py
-    .venv/bin/pip list          # check what's installed
+    ~/venv/bin/python script.py
+    ~/venv/bin/pip list         # check what's installed
 
-Node resolves `./node_modules` itself, so `node` and `npx` just work.
+Node packages go to `~/node_modules`, which Node finds by walking up from the
+working directory — `node` and `npx` just work, and `ls node_modules` will show
+nothing. That's expected; dependencies deliberately live outside the project so
+they never touch the user's filesystem.
 
-Packages land in a volume the launcher already mounted, so they're usable
-immediately. If the log says a restart is needed, relay that — you can't restart
-yourself. Say what you installed and why: you did it unsupervised, and the log
-is the user's only record.
+Both are usable immediately, no restart. Say what you installed and why: you did
+it unsupervised, and the log is the user's only record.

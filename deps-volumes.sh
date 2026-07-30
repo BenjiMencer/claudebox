@@ -19,8 +19,14 @@
 # POSIX only - no arrays, no unquoted word splitting - because bash and zsh
 # disagree on both and all three callers must agree on the names.
 
-CLAUDEBOX_DEPS_MOUNT_NODE="/home/ccagent/work/node_modules"
-CLAUDEBOX_DEPS_MOUNT_PY="/home/ccagent/work/.venv"
+# Mounted OUTSIDE the bind-mounted work directory, deliberately. Two reasons:
+# nothing appears in the project on the host, not even an empty mount point;
+# and `docker cp` into a bind-mounted path writes through to the host, so a
+# path under work/ could not be topped up mid-session without spilling package
+# code onto the Mac. Node resolves node_modules by walking up parent
+# directories, so /home/ccagent/node_modules is found from /home/ccagent/work.
+CLAUDEBOX_DEPS_MOUNT_NODE="/home/ccagent/node_modules"
+CLAUDEBOX_DEPS_MOUNT_PY="/home/ccagent/venv"
 
 # Stable per-project id: readable basename plus a hash of the full path, so two
 # checkouts sharing a basename ("api", "web") don't collide onto one volume and
@@ -50,6 +56,12 @@ claudebox_deps_volumes() {
 }
 
 claudebox_volume_exists() { docker volume inspect "$1" > /dev/null 2>&1; }
+
+# One container per project directory. Shared so the installer targets the same
+# container the launchers created.
+claudebox_container_name() {
+    printf 'cc-agent-%s' "$(basename "$PWD" | sed 's/[^a-zA-Z0-9_.-]/_/g')"
+}
 
 # Create a volume if it doesn't exist, and hand it to the agent user: a fresh
 # named volume is root-owned, and the agent runs unprivileged. Costs one short
