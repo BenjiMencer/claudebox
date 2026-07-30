@@ -21,8 +21,13 @@ RUN if [ "$WITH_BUILD_TOOLS" = "1" ]; then \
 # Install Claude Code.
 RUN npm install -g @anthropic-ai/claude-code
 
-# Unprivileged user the agent actually runs as.
-RUN useradd -m -s /bin/bash ccagent
+# Unprivileged user the agent actually runs as. The dependency directories are
+# created here so they exist and are owned by ccagent before anything mounts
+# over them: a fresh named volume inherits the image directory's ownership, and
+# root inside the running container cannot fix it later (--cap-drop=ALL).
+RUN useradd -m -s /bin/bash ccagent \
+ && mkdir -p /home/ccagent/node_modules /home/ccagent/venv \
+ && chown -R ccagent:ccagent /home/ccagent
 
 # Skill + guidance live in the agent user's config.
 COPY skills/ /home/ccagent/.claude/skills/

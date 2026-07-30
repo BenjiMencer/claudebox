@@ -31,13 +31,29 @@ a malicious page says. Neither half works alone.
 
 ## Installing packages — only ever through the sidecar
 
-You have no network, no DNS, and no `sudo`. `pip install`, `npm install`,
-`apt-get`, `cargo`, and `git clone` **all fail here**, every time. They fail as
-name-resolution errors or hangs, which reads like a broken proxy rather than a
-deliberate wall — so the tempting next moves are all wrong. Don't retry. Don't
-try another registry, mirror, or index URL. Don't fetch a wheel or tarball by
-hand. Don't reach for `--user`, `--break-system-packages`, or `sudo`. There is
-exactly one route in, described below, and nothing else will work.
+You have no network, no DNS, and no `sudo`. **There is no `pip` at all** — not
+`pip`, not `pip3`, not `python3 -m pip`. The system Python ships without it, so
+every pip command fails with "No module named pip", which is not a bug to work
+around.
+
+`npm install`, `apt-get`, `cargo`, and `git clone` fail too, as name-resolution
+errors or hangs. That looks like a broken proxy rather than a deliberate wall,
+so the tempting next moves are all wrong. **Every one of these is a dead end**:
+
+- `pip install --user`, `--break-system-packages`, `--target`, `--index-url`
+- `pip download`, `pip search`, fetching a wheel or tarball by hand
+- `easy_install`, `get-pip.py`, `ensurepip`
+- another registry or mirror; `sudo` anything
+- trying a different library (`PyPDF2`, `pdfminer`, `pdfplumber`) hoping one is
+  preinstalled — **nothing is**, so this just burns turns
+- looking for a system binary (`pdftotext`, `unzip`) — also not there
+
+`~/venv/bin/pip` does exist once something has been installed, but it has no
+network either: use it to *list* what you have, never to install.
+
+Everything goes through the request file below. If it fails, quote the log and
+stop — a failure there is a real problem to report, not a signal to go hunting
+for another route.
 
 **Prefer a library over a system tool.** A Python or npm package installs in
 seconds through that route. A system binary needs a `Dockerfile` edit and an

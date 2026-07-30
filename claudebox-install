@@ -141,11 +141,23 @@ sync_into_running_container() {
     | tr ' ' '\n' | grep -qx "$sync_vol" && return 0
 
   echo "claudebox-install: copying into the running $sync_container ..."
-  docker exec -u root "$sync_container" mkdir -p "$sync_dest"
+
+  # As ccagent, not root. The agent container runs --cap-drop=ALL, which takes
+  # CAP_DAC_OVERRIDE and CAP_CHOWN away from root as well - so root there cannot
+  # create or chown anything under /home/ccagent, while ccagent can, because it
+  # owns the directory. Getting this wrong fails with "Permission denied" from
+  # root, which reads like a sandbox rule rather than a missing capability.
+  docker exec -u ccagent "$sync_container" mkdir -p "$sync_dest" || {
+    echo "claudebox-install: could not create $sync_dest in $sync_container." >&2
+    return 1
+  }
+
+  # No chown afterwards, for the same reason: nothing in that container can
+  # perform one. It isn't needed - the sidecar already chowned the volume, and
+  # docker cp carries the archive's uid/gid through. (Not `docker cp -a`, which
+  # fails here trying to resolve 1001 in the host passwd database.)
   docker run --rm -v "$sync_vol":/src --entrypoint tar "$IMAGE" -C /src -cf - . \
     | docker cp - "$sync_container:$sync_dest"
-  docker exec -u root "$sync_container" \
-    chown -R "${CCAGENT_UID}:${CCAGENT_GID}" "$sync_dest"
 }
 
 # ----------------------------------------------------------------- ad-hoc ---
