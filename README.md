@@ -66,10 +66,10 @@ If you cloned somewhere else, `CLAUDEBOX_REPO` is the one line to change —
 everything else derives from it. Leave it out entirely and the function falls
 back to its own file location, which is also correct.
 
-Sourcing rather than pasting matters: a pasted copy of the function silently
-ignores every future `git pull`, so you end up rebuilding the image from new
-code while the launcher wrapping it stays whatever you pasted months ago. That
-failure is quiet and confusing — `claude-local --rebuild` appears to work, and
+Source it rather than pasting the function body in. A pasted copy is invisible
+to git: a pull updates the image and `claude-local.zsh`, while the launcher you
+actually run stays frozen at whatever you copied. That divergence is silent —
+`claude-local --rebuild` reports success, the image really does rebuild, and
 the change still doesn't take effect.
 
 Then, from any project directory:
@@ -145,7 +145,7 @@ Two caveats worth stating plainly:
   that can set your environment can grant itself bypass. Keep the default
   narrow, and don't export it globally in your shell profile.
 - **Do not add this repo to the list.** Bypass here would let the agent rewrite
-  `run.sh` and widen its own allowlist.
+  the launchers and widen its own allowlist.
 
 Auto mode (`--permission-mode auto`), which reviews actions with a classifier
 instead of skipping checks, is *not* available in this setup: the classifier

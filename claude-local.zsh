@@ -6,8 +6,8 @@
 #     CLAUDEBOX_REPO="$HOME/claude-docker"
 #     [ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
 #
-# A pasted copy silently ignores every future pull - the image rebuilds from
-# the repo but the launcher around it stays whatever you pasted months ago.
+# A copy pasted into ~/.zshrc is invisible to git: pulls update the image and
+# this file, while the launcher you actually run stays frozen at the copy.
 #
 # What it does:
 #   - loads the token from this repo's .env

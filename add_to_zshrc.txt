@@ -20,9 +20,9 @@ SAVEHIST=10000
 CLAUDEBOX_REPO="$HOME/claude-docker"
 
 # Source the function from the repo rather than defining it here, so a
-# `git pull` actually updates it. Don't paste the function body into .zshrc:
-# a pasted copy silently ignores every future pull, and you end up rebuilding
-# the image from new code while the launcher around it stays old.
+# `git pull` reaches it. Don't paste the function body in: a copy living in
+# .zshrc is invisible to git, and silently keeps running while pulls update
+# the version in the repo.
 [ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
 
 # Directories where the agent may run without permission prompts. Optional -
