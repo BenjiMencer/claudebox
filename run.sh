@@ -30,6 +30,7 @@ if ! docker info >/dev/null 2>&1; then
   exit 1
 fi
 
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 IMAGE="cc-agent"
 # One container per project directory, so running this from several projects
 # at once gives each its own container instead of colliding on the name.
@@ -42,50 +43,21 @@ SCANNER_IP="${SCANNER_IP:-100.123.181.11}"
 # The API base URL is on the mesh in your config; keep it consistent here.
 ANTHROPIC_BASE_URL="${ANTHROPIC_BASE_URL:-http://${SCANNER_IP}:8080}"
 
-# ---------------------------------------------------------------------------
-# Sandbox roots: where the agent may run without permission prompts.
-#
-# This container mounts the current directory as its only writable surface, so
-# scoping bypass by launch directory makes the blast radius exactly the thing
-# you already decided was disposable. Everywhere else gets the normal prompts.
-#
-# Override with CLAUDE_SANDBOX_ROOTS (colon-separated). That is a convenience,
-# not a security boundary: anything that can set your environment can grant
-# itself bypass, so keep the default narrow and don't export it globally.
-#
-# Do NOT add this repo to the list. Bypass here would let the agent rewrite
-# run.sh and widen its own allowlist.
-# ---------------------------------------------------------------------------
-SANDBOX_ROOTS="${CLAUDE_SANDBOX_ROOTS:-$HOME/claude-sandbox}"
+# Permission prompts are skipped only under a sandbox root. The gate is shared
+# with claude-local.zsh so the two launchers can't drift apart on it.
+source "$REPO_DIR/sandbox-gate.sh"
+claudebox_check_sandbox
 
-# Resolve symlinks on both sides before comparing, so a link into a sandbox
-# root - or out of one - can't change the answer.
-resolve_path() ( cd "$1" 2>/dev/null && pwd -P )
-
-CURRENT_DIR="$(resolve_path "$PWD" || true)"
 PERM_ARGS=()
-OLD_IFS="$IFS"
-IFS=':'
-for root in $SANDBOX_ROOTS; do
-  IFS="$OLD_IFS"
-  [ -n "$root" ] || continue
-  resolved_root="$(resolve_path "$root" || true)"
-  [ -n "$resolved_root" ] || continue
-  # Exact match or a path beneath it. Matching on "$root"/* rather than a bare
-  # prefix stops /tmp/sandbox-evil from matching a /tmp/sandbox root.
-  case "$CURRENT_DIR" in
-    "$resolved_root"|"$resolved_root"/*)
-      PERM_ARGS=(--permission-mode bypassPermissions)
-      echo "claudebox: $CURRENT_DIR is under sandbox root $resolved_root"
-      echo "claudebox: starting WITHOUT permission prompts (bypassPermissions)."
-      break
-      ;;
-  esac
-  IFS=':'
-done
-IFS="$OLD_IFS"
+if [ "$CLAUDEBOX_BYPASS" = 1 ]; then
+  PERM_ARGS=(--permission-mode bypassPermissions)
+  echo "claudebox: $PWD is under sandbox root $CLAUDEBOX_MATCHED_ROOT"
+  echo "claudebox: starting WITHOUT permission prompts (bypassPermissions)."
+fi
 
-docker build -t "$IMAGE" .
+# Build from the repo, not the current directory: the mounted work directory is
+# whatever you launched from, which generally has no Dockerfile in it.
+docker build -t "$IMAGE" "$REPO_DIR"
 
 # --rm only cleans up cc-agent on a normal exit. A crashed terminal, sleeping
 # Mac, or Docker Desktop restart can leave a stale container with this name

@@ -37,22 +37,16 @@ Pass extra arguments straight through to the `claude` CLI, e.g.:
 
 ## Recommended: a shell function for daily use
 
-`add_to_zshrc.txt` has a `claude-local` zsh function you can paste into
-`~/.zshrc`. Note it also includes a few unrelated shell niceties (`$EDITOR`,
-`AUTO_CD`, history settings) at the top — trim those if you already set your
-own, and only take the `claude-local` function itself. It does everything
-`run.sh` does, plus:
+The `claude-local` zsh function lives in `claude-local.zsh` in this repo. It
+does everything `run.sh` does, plus:
 
 - reads `SCANNER_TOKEN` from a `.env` file next to this repo instead of
   requiring you to `export` it every session,
 - starts Docker Desktop automatically if it isn't running,
 - auto-builds the image the first time you call it (`claude-local --rebuild`
-  to force a rebuild later),
-- works from *any* directory — it always mounts your current working
-  directory, not this repo.
+  to force a rebuild later).
 
-Setup — append `add_to_zshrc.txt`'s contents to `~/.zshrc` (or paste the
-`claude-local` function in manually), then create a `.env` next to this repo:
+Setup — **source it from `~/.zshrc`, don't paste it in**:
 
 ```bash
 cat add_to_zshrc.txt >> ~/.zshrc
@@ -60,9 +54,17 @@ echo 'SCANNER_TOKEN=<your token>' > ~/claude-docker/.env
 source ~/.zshrc
 ```
 
-By default the function expects this repo at `~/claude-docker` — edit the
-`claude_docker_dir` line near the top of the function if you cloned it
-somewhere else. Then, from any project directory:
+`add_to_zshrc.txt` is a one-line `source` of `claude-local.zsh` (plus some
+optional shell niceties you can trim). Sourcing matters: a pasted copy of the
+function silently ignores every future `git pull`, so you end up rebuilding the
+image from new code while the launcher wrapping it stays whatever you pasted
+months ago. That failure is quiet and confusing — `claude-local --rebuild`
+appears to work, and the change still doesn't take effect.
+
+The function finds this repo from its own location, so there is nothing to
+hand-edit if you cloned somewhere other than `~/claude-docker` — just point the
+`source` line in `~/.zshrc` at wherever it is. Then, from any project
+directory:
 
 ```bash
 claude-local
@@ -103,11 +105,15 @@ it's still running.
 
 By default the agent asks before editing files or running commands. You can
 skip those prompts, but only from directories you have explicitly designated
-as disposable. Both `run.sh` and `claude-local` compare the launch directory
-against a list of sandbox roots, and pass `--permission-mode bypassPermissions`
-only when it matches:
+as disposable. Both launchers source the same gate from `sandbox-gate.sh`,
+compare the launch directory against a list of sandbox roots, and pass
+`--permission-mode bypassPermissions` only when it matches:
 
-    SANDBOX_ROOTS="${CLAUDE_SANDBOX_ROOTS:-$HOME/claude-sandbox}"
+    CLAUDEBOX_DEFAULT_SANDBOX_ROOT="$HOME/claude-sandbox"
+
+The gate is shared rather than duplicated in each launcher on purpose: two
+copies of a security-relevant check drift, and a launcher that quietly grants
+different permissions than its twin is the bad kind of bug.
 
 The default root is `~/claude-sandbox`, which is not created for you — until it
 exists, nothing matches and every launch prompts normally. Override the list
@@ -147,8 +153,12 @@ local model. Bypass is all-or-nothing, which is why it is scoped by directory.
 - `selftest.sh` — fail-closed check that the internet is blocked and the
   scanner is reachable, before the agent is ever allowed to start.
 - `run.sh` — build + run with the right flags, mounting the current directory.
-- `add_to_zshrc.txt` — optional `claude-local` shell function for day-to-day use
-  from any project directory.
+- `claude-local.zsh` — the `claude-local` shell function used day to day. Source
+  it from `~/.zshrc`; don't paste it in, or `git pull` stops reaching it.
+- `add_to_zshrc.txt` — what to append to `~/.zshrc`: a `source` line for the
+  above, plus optional shell niceties.
+- `sandbox-gate.sh` — the shared directory check that decides whether a launch
+  skips permission prompts. Sourced by both launchers so they can't disagree.
 - `CLAUDE.md` — project instructions telling the agent to use only the scanner
   for web access and to treat scanned page content as untrusted data.
 - `skills/web-scanner/` — the scanner skill (reads its token from
