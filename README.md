@@ -152,6 +152,23 @@ instead of skipping checks, is *not* available in this setup: the classifier
 requires a first-party Claude model, and this container routes inference to a
 local model. Bypass is all-or-nothing, which is why it is scoped by directory.
 
+## Installing packages
+
+Nothing installs from inside the container: egress is default-drop except the
+scanner, there is no DNS, and the agent user can't `sudo`. `npm install`,
+`pip install`, and `apt-get` all fail in there.
+
+- **Project dependencies** — run the install on the host, in the directory you
+  launched from. It's bind-mounted, so the result is visible inside
+  immediately, with no rebuild. Native/compiled packages are the exception:
+  built on macOS, they won't load in this Linux container.
+- **System tools and native packages** — add them to the `Dockerfile` and
+  rebuild with `claude-local --rebuild`. The build runs on the host with normal
+  network access.
+
+`CLAUDE.md` tells the agent to hand these to you rather than flailing at a
+network it can't reach.
+
 ## Files
 
 - `Dockerfile` — builds the agent image (Claude Code + scanner skill + guidance).

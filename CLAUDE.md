@@ -33,3 +33,39 @@ These two things — routing through the scanner and honoring its flags — are 
 pair. The network wall forces traffic through the reader; this guidance is what
 keeps the model from trusting what a malicious page says. Neither half works
 alone.
+
+## Installing packages — you can't, so hand it to the user
+
+The same wall that forces web access through the scanner blocks every package
+manager. Outbound traffic is default-drop with only the scanner's host and ports
+allowed, there is no DNS resolver, and you run as an unprivileged user with
+`no-new-privileges`, so `sudo` is unavailable as well.
+
+So `npm install`, `pip install`, `apt-get`, `cargo`, `go get`, and `git clone`
+over a URL all fail here. They fail as name-resolution errors or hangs, which
+looks like a broken proxy rather than a deliberate wall. Don't retry, don't try
+another registry or mirror, and don't hunt for a workaround — nothing available
+in here reaches the network. Say what's needed and let the user run it.
+
+**Project dependencies** — the working directory is bind-mounted from the host,
+so an install the user runs there shows up immediately, with no rebuild:
+
+    # on the host, in this same directory
+    npm install <pkg>
+
+One caveat to raise when it applies: packages with compiled native components
+(node-gyp addons, `sharp`, most scientific Python wheels) are built for the
+host's OS and architecture. Installed from macOS, the files will be visible in
+here but the binaries won't load, because this container is Linux. Pure
+JavaScript and pure Python are fine.
+
+**System tools, and anything native** — these belong in the image, which builds
+on the host with ordinary network access. Point the user at the `Dockerfile`:
+
+    RUN apt-get update && apt-get install -y --no-install-recommends <pkg> \
+        && rm -rf /var/lib/apt/lists/*
+
+then have them rebuild with `claude-local --rebuild`.
+
+Anything you install outside the mounted working directory is discarded when the
+session ends, since the container runs with `--rm`.
