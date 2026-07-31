@@ -2,9 +2,10 @@
 # (zsh), and claudebox-install (bash).
 #
 # Dependencies live in Docker named volumes rather than in the mounted project
-# directory. Named volumes live inside Docker Desktop's VM, so installed package
-# code never lands on the host filesystem, and the installer that fetches it can
-# be handed the volume without being handed your source.
+# directory. Volumes are managed by Docker rather than living in your project -
+# inside the VM on Docker Desktop, under /var/lib/docker on a Linux daemon -
+# so installed package code never appears among your files, and the installer
+# that fetches it can be handed the volume without being handed your source.
 #
 # Sourcing this defines claudebox_deps_volumes, which sets:
 #   CLAUDEBOX_VOL_NODE  volume name for node_modules
@@ -23,7 +24,7 @@
 # nothing appears in the project on the host, not even an empty mount point;
 # and `docker cp` into a bind-mounted path writes through to the host, so a
 # path under work/ could not be topped up mid-session without spilling package
-# code onto the Mac. Node resolves node_modules by walking up parent
+# code into your project. Node resolves node_modules by walking up parent
 # directories, so /home/ccagent/node_modules is found from /home/ccagent/work.
 CLAUDEBOX_DEPS_MOUNT_NODE="/home/ccagent/node_modules"
 CLAUDEBOX_DEPS_MOUNT_PY="/home/ccagent/venv"
@@ -35,6 +36,8 @@ claudebox_project_id() {
     claudebox_base=$(basename "$PWD" | sed 's/[^a-zA-Z0-9_.-]/_/g')
     if command -v shasum > /dev/null 2>&1; then
         claudebox_hash=$(printf '%s' "$PWD" | shasum | cut -c1-8)
+    elif command -v sha1sum > /dev/null 2>&1; then
+        claudebox_hash=$(printf '%s' "$PWD" | sha1sum | cut -c1-8)
     else
         claudebox_hash=$(printf '%s' "$PWD" | cksum | tr -d ' ' | cut -c1-8)
     fi

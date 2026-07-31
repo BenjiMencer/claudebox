@@ -1,0 +1,27 @@
+# ~/.bashrc
+
+# ---------------------------------------------------------------------------
+# claude-local: contained, dockerized Claude Code
+#
+# Where you cloned the repo. This is the only path to edit — everything below
+# is derived from it.
+# ---------------------------------------------------------------------------
+CLAUDEBOX_REPO="$HOME/claudebox"
+
+# Source the function from the repo rather than defining it here, so a
+# `git pull` reaches it. Don't paste the function body in: a copy living in
+# .bashrc is invisible to git, and silently keeps running while pulls update
+# the version in the repo.
+[ -f "$CLAUDEBOX_REPO/claude-local.sh" ] && . "$CLAUDEBOX_REPO/claude-local.sh"
+
+# Directories where the agent may run without permission prompts. Optional -
+# defaults to ~/claude-sandbox. Colon-separated for several.
+#
+# The directories must exist; a root that isn't there matches nothing. Keep the
+# list narrow, and never include $CLAUDEBOX_REPO itself - bypass there would let
+# the agent rewrite its own allowlist.
+#
+# Must be exported: claudebox-install is a separate process, and if it can't see
+# this list it will disagree with the launcher about the same directory.
+#
+# export CLAUDE_SANDBOX_ROOTS="$HOME/claude-sandbox:$HOME/scratch"

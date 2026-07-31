@@ -1,4 +1,4 @@
-# Locked-down Claude Code in Docker (macOS)
+# Locked-down Claude Code in Docker
 
 Runs Claude Code in a container whose only permitted network destination is a
 web-scanner service. All web access goes through a scanner skill; everything
@@ -10,7 +10,9 @@ a reachable scanner service and its token.
 
 ## Prerequisites
 
-- Docker Desktop for Mac.
+- Docker: Docker Desktop on macOS, or a Docker daemon on Linux. On Linux, be
+  in the `docker` group (`sudo usermod -aG docker "$USER"`, then re-login) or
+  every command needs `sudo`.
 - A running web-scanner service reachable at a fixed IP (default assumed here:
   `100.123.181.11`, ports `8080` for the Anthropic-compatible API and `8099`
   for the scanner itself). If yours lives elsewhere, override `SCANNER_IP` /
@@ -42,24 +44,25 @@ does everything `run.sh` does, plus:
 
 - reads `SCANNER_TOKEN` from a `.env` file next to this repo instead of
   requiring you to `export` it every session,
-- starts Docker Desktop automatically if it isn't running,
+- starts Docker Desktop automatically if it isn't running (macOS; on Linux it
+  tells you the `systemctl` command rather than assuming it can escalate),
 - auto-builds the image the first time you call it (`claude-local --rebuild`
   to force a rebuild later).
 
-Setup — **source it from `~/.zshrc`, don't paste it in**:
+Setup — **source it from your rc file, don't paste it in**:
 
 ```bash
-cat add_to_zshrc.txt >> ~/.zshrc
+cat add_to_zshrc.txt  >> ~/.zshrc     # zsh, the macOS default
+cat add_to_bashrc.txt >> ~/.bashrc    # bash, the Ubuntu default
 echo 'SCANNER_TOKEN=<your token>' > ~/claudebox/.env
-source ~/.zshrc
 ```
 
-What that appends is a repo path and a `source` of `claude-local.zsh` (plus
-some optional shell niceties you can trim):
+Either appends a repo path and a `source` of `claude-local.sh`, which works
+under both shells (plus some optional shell niceties you can trim):
 
-```zsh
+```sh
 CLAUDEBOX_REPO="$HOME/claudebox"
-[ -f "$CLAUDEBOX_REPO/claude-local.zsh" ] && source "$CLAUDEBOX_REPO/claude-local.zsh"
+[ -f "$CLAUDEBOX_REPO/claude-local.sh" ] && . "$CLAUDEBOX_REPO/claude-local.sh"
 ```
 
 If you cloned somewhere else, `CLAUDEBOX_REPO` is the one line to change —
@@ -104,7 +107,7 @@ a second instance (see below), since two agents editing the same mounted
 files at once isn't safe.
 
 If a container with that name already exists — usually a stale one left
-behind by a crashed terminal, a sleeping Mac, or a Docker Desktop restart
+behind by a crashed terminal, a sleeping machine, or a Docker restart
 (since `--rm` only cleans up on a normal exit) — the script reclaims it
 automatically if it's stopped, or tells you how to attach to or remove it if
 it's still running.
@@ -177,7 +180,8 @@ A throwaway container fetches the packages into a Docker named volume, which the
 launchers attach at `~/node_modules` and `~/venv` inside the container. It gets
 no `SCANNER_TOKEN`, no API key, and no added capabilities, and exits when the
 install finishes. The agent's own network posture is untouched, and because
-volumes live in Docker Desktop's VM, package code never lands on your Mac.
+volumes are managed by Docker rather than living in your project, package code
+never appears among your files.
 
 **Policy follows the sandbox gate** — the same signal that decides permission
 prompts:
@@ -202,14 +206,16 @@ next launch.
 Three things to know:
 
 - **Native modules work**, because the installer runs the same image as the
-  agent. Installing on your Mac would build Darwin binaries that are visible
-  inside this Linux container but won't load. Compiling them needs the image
+  agent. Installing on the host would build binaries for the host's OS and
+  architecture, which may not load inside the container — from macOS they
+  definitely won't. Compiling them needs the image
   built with `CLAUDEBOX_BUILD_TOOLS=1` (off by default — it roughly doubles the
   image).
 - **Nothing appears in your project.** Dependencies live at `~/node_modules` and
   `~/venv` inside the container, outside the mounted directory — Node resolves
   its own by walking up, and Python needs `~/venv/bin/python`. So no empty mount
-  points on the Mac, but also no host-side autocomplete into `node_modules`.
+  points in your project, but also no host-side autocomplete into
+  `node_modules`.
 - **This isolates install time, not run time.** The dependency code executes
   inside claudebox, which has your project mounted, so a malicious package can
   still reach your source when the agent runs it.
@@ -271,10 +277,12 @@ in without you watching.
 - `selftest.sh` — fail-closed check that the internet is blocked and the
   scanner is reachable, before the agent is ever allowed to start.
 - `run.sh` — build + run with the right flags, mounting the current directory.
-- `claude-local.zsh` — the `claude-local` shell function used day to day. Source
-  it from `~/.zshrc`; don't paste it in, or `git pull` stops reaching it.
-- `add_to_zshrc.txt` — what to append to `~/.zshrc`: a `source` line for the
-  above, plus optional shell niceties.
+- `claude-local.sh` — the `claude-local` shell function used day to day, for
+  bash and zsh alike. Source it from your rc file; don't paste it in, or
+  `git pull` stops reaching it. (`claude-local.zsh` remains as a forwarding
+  shim for rc files that already point at the old name.)
+- `add_to_zshrc.txt` / `add_to_bashrc.txt` — what to append to `~/.zshrc` or
+  `~/.bashrc`: a `source` line for the above, plus optional shell niceties.
 - `sandbox-gate.sh` — the shared directory check that decides whether a launch
   skips permission prompts. Sourced by both launchers so they can't disagree.
 - `claudebox-install` — installs project dependencies into a Docker volume via
@@ -320,17 +328,19 @@ no-new-privileges).
 
 ## Honest limits — read this
 
-This is the best containment Docker Desktop for **macOS** offers, and it is
-**defense-in-depth, not an airtight guarantee**. Two structural reasons:
+This is **defense-in-depth, not an airtight guarantee**, and how close it gets
+depends on the platform. Two structural reasons:
 
 1. **The egress rules are set inside the container.** They're installed at
    startup and the agent then runs unprivileged with `no-new-privileges` and
    no `NET_ADMIN`, so the *agent* can't flush them. But the rules live in the
-   container's own network namespace, not in a host kernel you administer. On
-   a Mac, "the host" is Docker Desktop's hidden Linux VM, which you don't
-   manage — so there is no layer *you control* beneath the container to catch
-   a bypass. If the container image allows privilege escalation, root-in-
-   container can remove the rules.
+   container's own network namespace. If the image allows privilege
+   escalation, root-in-container can remove them — unless something beneath
+   the container stops it.
+
+   On **macOS** there is no such layer you control: "the host" is Docker
+   Desktop's hidden Linux VM, which you don't administer. On **Linux** you own
+   the kernel the container runs on, so you can add one — see below.
 
 2. **The scanner IP is a permitted channel by design.** The firewall controls
    *where* traffic goes, not *what's in it*. The scanner's own injection
@@ -338,11 +348,15 @@ This is the best containment Docker Desktop for **macOS** offers, and it is
    them healthy, and keep the `CLAUDE.md` rule about honoring the
    `contains_suspected_injection` flag.
 
-**If you need a real, kernel-enforced boundary**, run this on a Linux host
-instead and place `nftables`/`iptables` rules in the host's `DOCKER-USER`
-chain (matched on the container's bridge interface). There the rules sit below
-the container in a kernel you own, and even root inside the container cannot
-touch them.
+**On Linux, add the kernel-enforced layer.** Put `nftables`/`iptables` rules in
+the host's `DOCKER-USER` chain, matched on the container's bridge interface,
+allowing only the scanner's IP and ports. Those sit below the container in a
+kernel you administer, so even root inside the container cannot touch them —
+which closes the gap in point 1. The in-container rules stay as they are; this
+is a second, lower layer, not a replacement.
+
+On macOS this isn't available, and the container-level rules plus the
+fail-closed self-test are as far as it goes.
 
 The self-test in `selftest.sh` is what turns "I hope the wall holds" into "the
 agent won't start unless it does." It is the most important piece here; don't

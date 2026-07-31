@@ -19,14 +19,20 @@ if [ -z "${SCANNER_TOKEN:-}" ]; then
 fi
 
 if ! command -v docker >/dev/null 2>&1; then
-  echo "Docker is not installed. Install it with:" >&2
-  echo "  brew install --cask docker" >&2
-  echo "or download it from https://www.docker.com/products/docker-desktop/" >&2
+  echo "Docker is not installed." >&2
+  case "$(uname -s)" in
+    Darwin) echo "  brew install --cask docker" >&2 ;;
+    *)      echo "  sudo apt install docker.io   # or see docs.docker.com/engine/install" >&2 ;;
+  esac
   exit 1
 fi
 
 if ! docker info >/dev/null 2>&1; then
-  echo "Docker engine is not running. Start Docker Desktop (or the docker daemon) and try again." >&2
+  case "$(uname -s)" in
+    Darwin) echo "Docker isn't running. Start Docker Desktop and try again." >&2 ;;
+    *)      echo "The Docker daemon isn't running: sudo systemctl start docker" >&2
+            echo "If that says permission denied: sudo usermod -aG docker \"$USER\"" >&2 ;;
+  esac
   exit 1
 fi
 

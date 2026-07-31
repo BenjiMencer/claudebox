@@ -122,6 +122,12 @@ CHOWN="chown -R ${CCAGENT_UID}:${CCAGENT_GID}"
 # happen, and it runs the same image.
 sidecar() { docker run --rm -e CLAUDEBOX_INSTALLER=1 --entrypoint sh "$@"; }
 
+# Docker Desktop maps container-root writes on a bind mount back to the calling
+# user; a Linux daemon does not, so a lockfile written by the sidecar would end
+# up owned by root in the user's project. Hand anything written into the project
+# back explicitly. Harmless where the mapping already did it.
+HOST_CHOWN="chown $(id -u):$(id -g)"
+
 # Everything installs into a named volume, so package code stays off the host.
 # Whether the running agent can see it depends on the volume having been mounted
 # when its container started - report that accurately rather than always telling
@@ -203,6 +209,7 @@ if [ "$CLAUDEBOX_HAS_NODE" = 1 ]; then
          && { [ -f /work/package-lock.json ] && cp /work/package-lock.json /build/ || true; } \
          && cd /build && npm install \
          && cp /build/package-lock.json /work/package-lock.json \
+         && $HOST_CHOWN /work/package-lock.json \
          && $CHOWN /build/node_modules"
   else
     if [ ! -f "$PWD/package-lock.json" ]; then
