@@ -1,0 +1,15 @@
+#!/bin/sh
+# npm is real and needed for running things; only the install verbs are
+# redirected. The sidecar sets CLAUDEBOX_INSTALLER=1 and passes straight
+# through, since that is where installs are supposed to happen.
+REAL=/usr/local/bin/npm.real
+[ -n "${CLAUDEBOX_INSTALLER:-}" ] && exec "$REAL" "$@"
+case "${1:-}" in
+  install|i|add|ci|update|upgrade)
+    . /usr/local/lib/claudebox/guidance
+    echo "claudebox: 'npm $1' cannot reach the registry from this container." >&2
+    claudebox_guidance >&2
+    exit 1
+    ;;
+esac
+exec "$REAL" "$@"

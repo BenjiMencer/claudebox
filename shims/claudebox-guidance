@@ -1,0 +1,22 @@
+# Shared message for the shims and the PreToolUse hook. Sourced, not run.
+claudebox_guidance() {
+  cat <<'MSG'
+This container has no network, and no pip: that command cannot succeed here,
+and no flag or mirror will change that.
+
+Install through the sidecar instead. For something you need right now:
+
+    echo "<package>" > .claudebox-install-request
+    sleep 5; cat .claudebox-install.log
+
+For something the project should still have next session, add it to
+requirements.txt first, then send an empty request:
+
+    touch .claudebox-install-request
+
+Then run Python as ~/venv/bin/python, not python3 - packages install outside
+the project directory, so the system interpreter will not see them.
+
+Full detail: ~/.claude/CLAUDE.md, "Installing packages".
+MSG
+}

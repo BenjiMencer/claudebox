@@ -1,0 +1,8 @@
+#!/bin/sh
+# System packages need a Dockerfile change and a rebuild, which only the user
+# can do. Nothing at runtime should reach apt.
+. /usr/local/lib/claudebox/guidance
+echo "claudebox: apt-get is not usable here (no network, no sudo)." >&2
+echo "A system package needs the Dockerfile changed and the image rebuilt -" >&2
+echo "ask the user. Prefer a library that installs through the sidecar." >&2
+exit 1

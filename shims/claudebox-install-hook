@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# PreToolUse hook: catch package-install attempts before they run.
+#
+# The shims alongside this catch the same commands at execution time, but their
+# output is just stderr from a failed command - easy for a model to read as a
+# transient error and retry around. A denied tool call puts the reason directly
+# in the conversation instead, which is the part that actually redirects
+# behaviour.
+#
+# Exit 2 makes stderr the rejection message. Reads the command from the hook's
+# stdin JSON with python3, since jq isn't in this image.
+set -uo pipefail
+
+. /usr/local/lib/claudebox/guidance
+
+cmd="$(python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("tool_input", {}).get("command", ""))
+except Exception:
+    pass' 2>/dev/null)"
+
+[ -n "$cmd" ] || exit 0
+
+# Deliberately narrow: only the verbs that fetch. `pip list`, `npm run`, and
+# `npm ls` are all fine and must keep working, including ~/venv/bin/pip list.
+# Two patterns. The first needs a word boundary in front, so that a path like
+# ~/venv/bin/pip still matches the command but a filename containing "pip"
+# doesn't. The second is for tokens distinctive enough to match anywhere,
+# including mid-URL - `curl -O https://.../get-pip.py` is an install attempt
+# wherever the string appears.
+if printf '%s' "$cmd" | grep -qE \
+     '(^|[^a-zA-Z0-9_-])(pip3?[[:space:]]+(install|download|search)|python3?[[:space:]]+-m[[:space:]]+pip[[:space:]]+(install|download)|apt(-get)?[[:space:]]+install|npm[[:space:]]+(install|i|add|ci)|yarn[[:space:]]+add|pnpm[[:space:]]+(add|install)|cargo[[:space:]]+install)' \
+   || printf '%s' "$cmd" | grep -qE 'easy_install|get-pip|ensurepip'
+then
+  {
+    echo "Blocked: that installs packages, and this container cannot reach a registry."
+    echo
+    claudebox_guidance
+  } >&2
+  exit 2
+fi
+
+exit 0

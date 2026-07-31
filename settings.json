@@ -15,6 +15,26 @@
   "model": "llm-local",
   "skipWorkflowUsageWarning": true,
   "permissions": {
-    "deny": ["WebSearch", "WebFetch"]
+    "deny": [
+      "WebSearch",
+      "WebFetch"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/usr/local/bin/claudebox-install-hook"
+          },
+          {
+            "type": "command",
+            "command": "/usr/local/bin/claudebox-web-hook"
+          }
+        ]
+      }
+    ]
   }
 }

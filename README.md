@@ -217,6 +217,28 @@ Three things to know:
 **System tools** go in the `Dockerfile`, then `claude-local --rebuild`. That
 build runs on the host with ordinary network access.
 
+### Enforcement, not just instructions
+
+`CLAUDE.md` explains the rules; two mechanisms make them hold when the agent
+forgets, which it does.
+
+**Shims** replace `pip`, `pip3`, `easy_install`, `apt`, and `apt-get` on `PATH`
+with scripts that explain the sidecar and exit non-zero. `npm` is wrapped rather
+than replaced: `npm run` and `npm ls` pass through to the real binary, only the
+install verbs are redirected. The installer sets `CLAUDEBOX_INSTALLER=1` so its
+own `npm` calls go straight through.
+
+**`PreToolUse` hooks** catch the same commands one step earlier, and this is the
+half that changes behaviour: a shim writes to stderr, which reads like a
+transient error worth retrying, while a denied tool call puts the reason in the
+conversation. `claudebox-install-hook` covers package managers;
+`claudebox-web-hook` covers `curl`, `wget`, `git clone` and friends, pointing at
+the scanner skill — and lets requests to the scanner's own IP through, so health
+checks still work.
+
+Both are deliberately narrow. `pip list`, `npm run build`, `git status` and
+`grep install README.md` are untouched.
+
 ### Letting the agent install for itself
 
 Under a sandbox root, the launchers also start a watcher. The agent writes
@@ -259,6 +281,8 @@ in without you watching.
   a throwaway container, so the agent never needs network access.
 - `deps-volumes.sh` — shared naming/detection for those volumes, so the
   installer and both launchers agree on where dependencies live.
+- `shims/` — `PATH` stand-ins for `pip`/`apt`/`npm`, plus the two `PreToolUse`
+  hooks that redirect install and network attempts. Baked into the image.
 - `claudebox-watch` — under a sandbox root, lets the agent trigger an install
   by writing a request file. Started and stopped by the launchers.
 - `CLAUDE.md` — project instructions telling the agent to use only the scanner

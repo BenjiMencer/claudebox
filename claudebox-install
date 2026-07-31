@@ -117,7 +117,10 @@ CCAGENT_UID="$(docker run --rm --entrypoint sh "$IMAGE" -c 'id -u ccagent')"
 CCAGENT_GID="$(docker run --rm --entrypoint sh "$IMAGE" -c 'id -g ccagent')"
 CHOWN="chown -R ${CCAGENT_UID}:${CCAGENT_GID}"
 
-sidecar() { docker run --rm --entrypoint sh "$@"; }
+# CLAUDEBOX_INSTALLER lets the npm shim through to the real binary. The shim
+# exists to redirect the agent; this is the place installs are supposed to
+# happen, and it runs the same image.
+sidecar() { docker run --rm -e CLAUDEBOX_INSTALLER=1 --entrypoint sh "$@"; }
 
 # Everything installs into a named volume, so package code stays off the host.
 # Whether the running agent can see it depends on the volume having been mounted

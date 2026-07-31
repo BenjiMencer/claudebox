@@ -36,6 +36,25 @@ COPY settings.json /home/ccagent/.claude/settings.json
 COPY claude.json /home/ccagent/.claude.json
 RUN chown -R ccagent:ccagent /home/ccagent/.claude /home/ccagent/.claude.json
 
+# Shims for the package managers, plus the PreToolUse hook that catches the
+# same commands one step earlier. Installed after the apt/npm work above so the
+# build itself is unaffected. npm is renamed rather than replaced: the shim
+# redirects only its install verbs and execs the real one otherwise.
+# Staged first, then installed: copying the npm shim straight to
+# /usr/local/bin would clobber the real npm before it could be moved aside.
+COPY shims/ /usr/local/lib/claudebox/shims/
+RUN set -eux \
+ && mv /usr/local/bin/npm /usr/local/bin/npm.real \
+ && cp /usr/local/lib/claudebox/shims/claudebox-guidance /usr/local/lib/claudebox/guidance \
+ && for f in pip apt-get npm claudebox-install-hook claudebox-web-hook; do \
+      cp "/usr/local/lib/claudebox/shims/$f" /usr/local/bin/$f; \
+      chmod +x /usr/local/bin/$f; \
+    done \
+ && ln -sf /usr/local/bin/pip /usr/local/bin/pip3 \
+ && ln -sf /usr/local/bin/pip /usr/local/bin/easy_install \
+ && ln -sf /usr/local/bin/apt-get /usr/local/bin/apt \
+ && rm -rf /usr/local/lib/claudebox/shims
+
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY selftest.sh   /usr/local/bin/selftest.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/selftest.sh
